@@ -214,6 +214,10 @@ const log = {
   pinned: false,
   line: 0,
   wrap: stored("kiln.wrap", "1") === "1",
+  open: false,
+  openRaw: null,
+  openLine: null,
+  ticket: 0,
   query: "",
   hit: -1,
 };
@@ -256,15 +260,22 @@ async function loadLog(task, attempt) {
   const changed = task !== log.task || attempt !== log.attempt;
   log.task = task;
   log.attempt = attempt;
+  const ticket = ++log.ticket;
   markSelected();
   try {
     const response = await fetch(`/fragments/log/${buildId}/${attempt}/${task}`, { headers: { "X-Kiln-Fragment": "1" } });
     if (response.status === 401) { location.reload(); return; }
     if (!response.ok) return;
+    const html = await response.text();
+    if (ticket !== log.ticket) return;
     const scroller = logBody();
     const keep = !changed && scroller ? scroller.scrollTop : null;
-    holder.innerHTML = await response.text();
-    log.bytes = Number(holder.querySelector("[data-bytes]")?.dataset.bytes || 0);
+    holder.innerHTML = html;
+    const head = holder.querySelector("[data-bytes]");
+    log.bytes = Number(head?.dataset.bytes || 0);
+    log.open = head?.dataset.open === "true";
+    log.openRaw = null;
+    log.openLine = [...holder.querySelectorAll(".line")].at(-1) || null;
     log.lines = Number(holder.querySelector("[data-first-line]")?.dataset.firstLine || 0) + holder.querySelectorAll(".line").length;
     enhance(holder);
     const open = holder.querySelector("details[data-open-last]");
@@ -300,48 +311,53 @@ function stripAnsi(text) {
 }
 
 function ansiInto(target, text) {
-  let classes = [];
+  const style = { bold: false, dim: false, color: null };
+  let run = "";
+  let runClass = "";
+  const className = () => [style.bold && "a-b", style.dim && "a-d", style.color !== null && `a-3${style.color}`].filter(Boolean).join(" ");
+  const flush = () => {
+    if (!run) return;
+    if (runClass) {
+      const span = document.createElement("span");
+      span.className = runClass;
+      span.textContent = run;
+      target.append(span);
+    } else {
+      target.append(run);
+    }
+    run = "";
+  };
+  const pattern = /\x1b\[([0-9;]{0,64})([A-Za-z])/g;
   let last = 0;
-  const pattern = /\x1b\[([0-9;]*)([A-Za-z])/g;
-  const push = (part) => {
+  let match;
+  const add = (part) => {
     part = part.replace(/\x1b/g, "");
     if (!part) return;
-    if (!classes.length) {
-      target.append(part);
-      return;
+    const current = className();
+    if (current !== runClass) {
+      flush();
+      runClass = current;
     }
-    const span = document.createElement("span");
-    span.className = classes.join(" ");
-    span.textContent = part;
-    target.append(span);
+    run += part;
   };
-  let match;
   while ((match = pattern.exec(text))) {
-    push(text.slice(last, match.index));
+    add(text.slice(last, match.index));
     last = pattern.lastIndex;
     if (match[2] !== "m") continue;
     const parts = match[1].split(";");
     for (let i = 0; i < parts.length; i++) {
       const code = Number(parts[i] || 0);
-      if (code === 38 || code === 48) {
-        i += parts[i + 1] === "5" ? 2 : parts[i + 1] === "2" ? 4 : 0;
-      } else if (code === 0) {
-        classes = [];
-      } else if (code === 1) {
-        classes.push("a-b");
-      } else if (code === 2) {
-        classes.push("a-d");
-      } else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
-        classes = classes.filter((c) => !c.startsWith("a-3"));
-        classes.push(`a-3${code % 10}`);
-      } else if (code === 39) {
-        classes = classes.filter((c) => !c.startsWith("a-3"));
-      } else if (code === 22) {
-        classes = classes.filter((c) => c !== "a-b" && c !== "a-d");
-      }
+      if (code === 38 || code === 48) i += parts[i + 1] === "5" ? 2 : parts[i + 1] === "2" ? 4 : 0;
+      else if (code === 0) Object.assign(style, { bold: false, dim: false, color: null });
+      else if (code === 1) style.bold = true;
+      else if (code === 2) style.dim = true;
+      else if (code === 22) Object.assign(style, { bold: false, dim: false });
+      else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) style.color = code % 10;
+      else if (code === 39) style.color = null;
     }
   }
-  push(text.slice(last));
+  add(text.slice(last));
+  flush();
 }
 
 function errorLine(text) {
@@ -360,37 +376,60 @@ function jumpToLine(number) {
   reveal(line);
 }
 
+function makeLine(raw, number) {
+  const id = `task-${log.task}-L${number}`;
+  const line = document.createElement("div");
+  const visible = raw.split("\r").filter(Boolean).at(-1) || "";
+  const plain = stripAnsi(visible);
+  line.className = visible.startsWith("$ ") ? "line cmd" : errorLine(plain) ? "line err" : "line";
+  line.id = id;
+  const link = document.createElement("a");
+  link.className = "ln";
+  link.href = `#${id}`;
+  link.tabIndex = -1;
+  link.setAttribute("aria-hidden", "true");
+  link.textContent = String(number);
+  const content = document.createElement("span");
+  content.className = "tx";
+  ansiInto(content, visible);
+  line.append(link, content);
+  if (log.query && plain.toLowerCase().includes(log.query)) line.classList.add("match");
+  return line;
+}
+
 function appendLog(text) {
   const container = [...document.querySelectorAll("#log .lines")].at(-1);
-  if (!container) {
+  if (!container || (log.open && log.openRaw === null)) {
     loadLog(log.task, log.attempt);
     return;
   }
   const el = logBody();
   const stick = el && nearBottom(el);
-  for (const raw of text.split("\n")) {
-    if (raw === "") continue;
+  const parts = text.split("\n");
+  const ends = text.endsWith("\n");
+  if (ends) parts.pop();
+  parts.forEach((raw, index) => {
+    if (index === 0 && log.open) {
+      log.openRaw += raw;
+      const line = makeLine(log.openRaw, log.lines);
+      log.openLine.replaceWith(line);
+      log.openLine = line;
+      return;
+    }
     if (raw.startsWith("##kiln[")) {
-      loadLog(log.task, log.attempt);
+      log.open = false;
       return;
     }
     log.lines += 1;
-    const id = `task-${log.task}-L${log.lines}`;
-    const line = document.createElement("div");
-    const visible = raw.split("\r").filter(Boolean).at(-1) || "";
-    const plain = stripAnsi(visible);
-    line.className = visible.startsWith("$ ") ? "line cmd" : errorLine(plain) ? "line err" : "line";
-    line.id = id;
-    const number = document.createElement("a");
-    number.className = "ln";
-    number.href = `#${id}`;
-    number.textContent = String(log.lines);
-    const content = document.createElement("span");
-    content.className = "tx";
-    ansiInto(content, visible);
-    line.append(number, content);
-    if (log.query && plain.toLowerCase().includes(log.query)) line.classList.add("match");
+    const line = makeLine(raw, log.lines);
     container.append(line);
+    log.openLine = line;
+    log.openRaw = raw;
+  });
+  log.open = !ends && (parts.length > 0 || log.open);
+  if (text.split("\n").some((raw) => raw.startsWith("##kiln["))) {
+    loadLog(log.task, log.attempt);
+    return;
   }
   if (log.query) updateHits();
   if (stick || log.follow) scrollLog();

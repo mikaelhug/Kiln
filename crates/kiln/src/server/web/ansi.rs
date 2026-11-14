@@ -38,36 +38,29 @@ fn is_error(text: &str) -> bool {
         || text.split(|c: char| !c.is_ascii_alphabetic()).any(|w| w == "FAIL" || w == "FAILED")
 }
 
-fn spans(text: &str) -> Markup {
-    let mut segments: Vec<(Vec<&'static str>, String)> = Vec::new();
-    let mut classes: Vec<&'static str> = Vec::new();
-    let mut current = String::new();
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\u{1b}' {
-            current.push(c);
-            continue;
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct Style {
+    bold: bool,
+    dim: bool,
+    color: Option<u8>,
+}
+
+impl Style {
+    fn class(self) -> String {
+        let mut parts = Vec::new();
+        if self.bold {
+            parts.push("a-b".to_owned());
         }
-        if chars.peek() != Some(&'[') {
-            continue;
+        if self.dim {
+            parts.push("a-d".to_owned());
         }
-        chars.next();
-        let mut code = String::new();
-        let mut terminator = None;
-        for next in chars.by_ref() {
-            if next.is_ascii_digit() || next == ';' {
-                code.push(next);
-            } else {
-                terminator = Some(next);
-                break;
-            }
+        if let Some(color) = self.color {
+            parts.push(format!("a-3{color}"));
         }
-        if terminator != Some('m') {
-            continue;
-        }
-        if !current.is_empty() {
-            segments.push((classes.clone(), std::mem::take(&mut current)));
-        }
+        parts.join(" ")
+    }
+
+    fn apply(&mut self, code: &str) {
         let parts: Vec<&str> = code.split(';').collect();
         let mut index = 0;
         while index < parts.len() {
@@ -81,34 +74,56 @@ fn spans(text: &str) -> Markup {
                         _ => 0,
                     };
                 }
-                0 => classes.clear(),
-                1 => classes.push("a-b"),
-                2 => classes.push("a-d"),
-                n @ 30..=37 => {
-                    classes.retain(|c| !c.starts_with("a-3"));
-                    classes.push(COLORS[usize::from(n - 30)]);
-                }
-                n @ 90..=97 => {
-                    classes.retain(|c| !c.starts_with("a-3"));
-                    classes.push(COLORS[usize::from(n - 90)]);
-                }
-                39 => classes.retain(|c| !c.starts_with("a-3")),
-                22 => classes.retain(|c| *c != "a-b" && *c != "a-d"),
+                0 => *self = Style::default(),
+                1 => self.bold = true,
+                2 => self.dim = true,
+                22 => (self.bold, self.dim) = (false, false),
+                n @ (30..=37 | 90..=97) => self.color = Some(n % 10),
+                39 => self.color = None,
                 _ => {}
             }
         }
     }
-    if !current.is_empty() {
-        segments.push((classes, current));
+}
+
+fn spans(text: &str) -> Markup {
+    let mut segments: Vec<(Style, String)> = Vec::new();
+    let mut style = Style::default();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            match segments.last_mut() {
+                Some((last, current)) if *last == style => current.push(c),
+                _ => segments.push((style, c.to_string())),
+            }
+            continue;
+        }
+        if chars.peek() != Some(&'[') {
+            continue;
+        }
+        chars.next();
+        let mut code = String::new();
+        let mut terminator = None;
+        for next in chars.by_ref() {
+            if next.is_ascii_digit() || next == ';' {
+                if code.len() < 64 {
+                    code.push(next);
+                }
+            } else {
+                terminator = Some(next);
+                break;
+            }
+        }
+        if terminator == Some('m') {
+            style.apply(&code);
+        }
     }
     html! {
-        @for (classes, text) in &segments {
-            @if classes.is_empty() { (text) } @else { span class=(classes.join(" ")) { (text) } }
+        @for (style, text) in &segments {
+            @if *style == Style::default() { (text) } @else { span class=(style.class()) { (text) } }
         }
     }
 }
-
-const COLORS: [&str; 8] = ["a-30", "a-31", "a-32", "a-33", "a-34", "a-35", "a-36", "a-37"];
 
 #[cfg(test)]
 mod tests {
@@ -122,5 +137,7 @@ mod tests {
         assert!(progress.contains("downloading 100%") && !progress.contains("10%"));
         let truecolor = line(2, 9, "\u{1b}[38;2;255;32;0mwarm\u{1b}[0m").into_string();
         assert!(truecolor.contains(r#"<span class="tx">warm</span>"#), "{truecolor}");
+        let flood = line(2, 10, &"\u{1b}[1mX".repeat(10_000)).into_string();
+        assert!(flood.len() < 20_000, "repeated styles stay one span: {} bytes", flood.len());
     }
 }

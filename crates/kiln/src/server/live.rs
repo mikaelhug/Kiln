@@ -258,7 +258,7 @@ impl Platform for Live {
             Err(error) if is_status(&error, 404) || is_status(&error, 400) => return Ok(String::new()),
             Err(error) => return Err(error.into()),
         };
-        let half = (super::logs::MAX_LOG_BYTES / 2) as usize;
+        let half = (super::logs::MAX_LOG_BYTES / 2) as usize - 1024;
         let (mut head, mut tail, mut skipped) = (Vec::new(), Vec::new(), 0usize);
         let mut buffer = vec![0u8; 64 * 1024];
         loop {
@@ -281,6 +281,11 @@ impl Platform for Live {
         }
         if tail.len() > half {
             let drop = tail.len() - half;
+            tail.drain(..drop);
+            skipped += drop;
+        }
+        if skipped > 0 {
+            let drop = tail.iter().position(|b| *b == b'\n').map_or(tail.len(), |i| i + 1);
             tail.drain(..drop);
             skipped += drop;
         }

@@ -31,6 +31,7 @@ struct Flow {
     action: String,
     api: String,
     out: PathBuf,
+    file: Mutex<Option<std::fs::File>>,
     done: Mutex<Option<oneshot::Sender<Result<CreatedApp, String>>>>,
 }
 
@@ -76,6 +77,12 @@ pub async fn run(options: Options) -> Result<ExitCode> {
     if options.out.exists() {
         bail!("{} already exists; choose another --out or move it away", options.out.display());
     }
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&options.out)
+        .with_context(|| format!("creating {}", options.out.display()))?;
     let host = url.trim_start_matches("https://");
     let name = options.name.clone().unwrap_or_else(|| format!("Kiln {host}").chars().take(34).collect());
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", options.port))
@@ -96,6 +103,7 @@ pub async fn run(options: Options) -> Result<ExitCode> {
         action,
         api: options.api.clone(),
         out: options.out.clone(),
+        file: Mutex::new(Some(file)),
         done: Mutex::new(Some(sender)),
     });
     let app = Router::new().route("/", get(start)).route("/callback", get(callback)).with_state(flow);
@@ -120,7 +128,13 @@ pub async fn run(options: Options) -> Result<ExitCode> {
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     let _ = stop.send(());
     let _ = server.await;
-    let created = outcome.map_err(|error| anyhow::anyhow!(error))?;
+    let created = match outcome {
+        Ok(created) => created,
+        Err(error) => {
+            let _ = std::fs::remove_file(&options.out);
+            bail!(error);
+        }
+    };
     report(&created, &url, &options.out);
     Ok(ExitCode::SUCCESS)
 }
@@ -180,7 +194,19 @@ async fn callback(State(flow): State<Arc<Flow>>, Query(query): Query<Callback>) 
         return page("Already done", html! { h1 { "The app was already created" } p { "Return to the terminal." } });
     };
     let result = match convert_manifest(&flow.api, &code).await {
-        Ok(created) => write_secret(&flow.out, &created).map(|()| created).map_err(|e| format!("{e:#}")),
+        Ok(created) => {
+            let file = flow.file.lock().expect("setup lock").take();
+            match secret_yaml(&created) {
+                Ok(yaml) => {
+                    let written = file.map(|mut file| file.write_all(yaml.as_bytes()));
+                    if !matches!(written, Some(Ok(()))) {
+                        eprintln!("\nCould not write {}. Save these Secrets now:\n\n{yaml}", flow.out.display());
+                    }
+                    Ok(created)
+                }
+                Err(error) => Err(format!("{error:#}")),
+            }
+        }
         Err(error) => Err(format!("GitHub did not hand over the app credentials: {error}")),
     };
     let response = match &result {
@@ -197,7 +223,7 @@ async fn callback(State(flow): State<Arc<Flow>>, Query(query): Query<Callback>) 
     response
 }
 
-fn write_secret(out: &PathBuf, created: &CreatedApp) -> Result<()> {
+fn secret_yaml(created: &CreatedApp) -> Result<String> {
     let quote = |value: &str| serde_json::to_string(value).expect("strings serialize");
     let pem: String = created.pem.trim_end().lines().map(|line| format!("    {line}\n")).collect();
     let webhook = created.webhook_secret.clone().context("GitHub did not return a webhook secret")?;
@@ -208,14 +234,7 @@ fn write_secret(out: &PathBuf, created: &CreatedApp) -> Result<()> {
         quote(&webhook),
         quote(&created.client_secret),
     );
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(out)
-        .with_context(|| format!("creating {}", out.display()))?;
-    file.write_all(yaml.as_bytes())?;
-    Ok(())
+    Ok(yaml)
 }
 
 fn report(created: &CreatedApp, url: &str, out: &std::path::Path) {

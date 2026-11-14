@@ -302,7 +302,7 @@ fn relay(stream: Box<dyn Read + Send>, redactor: &Redactor) {
         match (&mut reader).take(2 * MAX_LINE as u64).read_until(b'\n', &mut line) {
             Ok(0) | Err(_) => return,
             Ok(_) => {
-                let cut = !line.ends_with(b"\n");
+                let cut = line.len() == 2 * MAX_LINE && !line.ends_with(b"\n");
                 if cut {
                     let mut rest = Vec::new();
                     loop {

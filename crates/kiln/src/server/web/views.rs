@@ -648,7 +648,7 @@ pub fn repos_live(rows: &[RepoRow]) -> Markup {
                 } @else {
                     div class="table-wrap" {
                         table class="table" {
-                            thead { tr { th { "Repository" } th { "Latest build" } th { "Recent" } th { "Released" } } }
+                            thead { tr { th { "Repository" } th { "Latest build" } th class="wide-only" { "Recent" } th class="wide-only" { "Released" } } }
                             tbody {
                                 @for row in &used {
                                     @let repo = &row.repo;
@@ -677,8 +677,8 @@ pub fn repos_live(rows: &[RepoRow]) -> Markup {
                                                 None => span class="muted" { "No builds yet" },
                                             }
                                         }
-                                        td { (recent_strip(repo, &row.recent)) }
-                                        td {
+                                        td class="wide-only" { (recent_strip(repo, &row.recent)) }
+                                        td class="wide-only" {
                                             @match &row.version { Some(version) => span class="pill mono ok" { (version) }, None => span class="muted" { "–" } }
                                         }
                                     }
@@ -1388,7 +1388,7 @@ pub fn log_view(build: &Build, attempt: i64, task: &Task, text: &str, bytes: usi
     let raw = format!("/builds/{}/logs/{attempt}/{}.txt", build.id, task.ordinal);
     html! {
         div class="log" {
-            div class="log-head" data-bytes=(bytes) data-first-line=(skipped.unwrap_or(0)) data-state=(task.state.as_str()) {
+            div class="log-head" data-bytes=(bytes) data-open=(!text.is_empty() && !text.ends_with('\n')) data-first-line=(skipped.unwrap_or(0)) data-state=(task.state.as_str()) {
                 div class="name" { (task_status(task.state, "sm")) span { (task_title(task)) } }
                 span class="meta" {
                     (elapsed(task.started_at, task.finished_at))
@@ -1536,7 +1536,7 @@ pub fn system(ctx: &Context<'_>, data: &SystemData) -> Markup {
                                             ("image_released", Some((reference, digest))) => {
                                                 "released " code { (reference.rsplit('/').next().unwrap_or(reference)) }
                                                 @if let Some((link, label)) = target { " from " a href=(link) { (label) } }
-                                                span class="detail mono" { (digest) }
+                                                span class="detail mono" title=(digest) { (&digest[..digest.len().min(19)]) }
                                             },
                                             _ => {
                                                 @if verb.is_empty() { (entry.action.replace('_', " ")) } @else { (verb) }

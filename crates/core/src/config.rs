@@ -357,16 +357,18 @@ fn validate_job(at: &str, job: &Job, verify: bool, images: &HashSet<&str>, out: 
     }
     let mut caches = HashSet::new();
     for path in &job.cache {
-        let trimmed = path.trim_end_matches('/');
-        let reserved = RESERVED_PATHS.iter().any(|r| trimmed == *r || trimmed.starts_with(&format!("{r}/")));
-        if matches!(trimmed, "" | ".") || reserved {
+        if Path::new(path).components().any(|c| matches!(c, Component::ParentDir)) {
+            out.push(diagnostic(format!("{at}.cache"), format!("{path:?} must not contain ..")));
+            continue;
+        }
+        let normal = normalize(path);
+        let reserved = RESERVED_PATHS.iter().any(|r| normal == *r || normal.starts_with(&format!("{r}/")));
+        if matches!(normal.as_str(), "" | "/") || reserved {
             out.push(diagnostic(
                 format!("{at}.cache"),
                 format!("{path:?} is used by Kiln or the system and cannot be a cache"),
             ));
-        } else if Path::new(path).components().any(|c| matches!(c, Component::ParentDir)) {
-            out.push(diagnostic(format!("{at}.cache"), format!("{path:?} must not contain ..")));
-        } else if !caches.insert(trimmed) {
+        } else if !caches.insert(normal) {
             out.push(diagnostic(format!("{at}.cache"), format!("{path:?} is listed twice")));
         }
     }
@@ -421,6 +423,17 @@ fn validate_job(at: &str, job: &Job, verify: bool, images: &HashSet<&str>, out: 
     }
 }
 
+fn normalize(path: &str) -> String {
+    let parts: Vec<String> = Path::new(path)
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    if path.starts_with('/') { format!("/{}", parts.join("/")) } else { parts.join("/") }
+}
+
 fn check_relative(value: &str) -> Result<(), String> {
     let path = Path::new(value);
     if path.is_absolute() {
@@ -458,6 +471,16 @@ mod tests {
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert!(errors.iter().any(|e| e.starts_with("images[0].file")));
         assert!(errors.iter().any(|e| e.starts_with("images[0].context")));
+    }
+
+    #[test]
+    fn caches_cannot_cover_the_workspace_or_kilns_own_paths() {
+        for path in ["/./kiln", "//dev/shm", "/workspace/.", "./.", "/"] {
+            let text = format!("version = 1\n[test.unit]\nimage = \"node\"\nsteps = [\"true\"]\ncache = [{path:?}]\n");
+            assert!(parse(&text, "app").is_err(), "{path}");
+        }
+        let text = "version = 1\n[test.unit]\nimage = \"node\"\nsteps = [\"true\"]\ncache = [\"/root/.npm\", \"node_modules\"]\n";
+        assert!(parse(text, "app").is_ok());
     }
 
     #[test]

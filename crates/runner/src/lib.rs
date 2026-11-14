@@ -30,8 +30,16 @@ pub fn label_value(text: &str) -> String {
 }
 
 pub fn resource_name(prefix: &str, value: &str) -> String {
+    named(prefix, value, &value.to_ascii_lowercase())
+}
+
+pub fn path_key(path: &str) -> String {
+    named("", path, path)
+}
+
+fn named(prefix: &str, value: &str, identity: &str) -> String {
     let lower = value.to_ascii_lowercase();
-    let hash = hex::encode(&Sha256::digest(lower.as_bytes())[..4]);
+    let hash = hex::encode(&Sha256::digest(identity.as_bytes())[..4]);
     let mut slug = String::new();
     for c in lower.chars() {
         let c = if c.is_ascii_alphanumeric() { c } else { '-' };

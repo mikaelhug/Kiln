@@ -36,7 +36,10 @@ const SESSION_MAX: i64 = 7 * 86_400;
 fn content_policy(github_web: &str) -> HeaderValue {
     let avatars = match url::Url::parse(github_web) {
         Ok(url) if url.host_str() == Some("github.com") => "https://avatars.githubusercontent.com".to_owned(),
-        Ok(url) => url.origin().ascii_serialization(),
+        Ok(url) => {
+            let host = url.host_str().unwrap_or_default();
+            format!("{} {}://avatars.{host}", url.origin().ascii_serialization(), url.scheme())
+        }
         Err(_) => "https://avatars.githubusercontent.com".to_owned(),
     };
     let policy = format!(

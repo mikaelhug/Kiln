@@ -29,11 +29,13 @@ spec:
       message: build containers must not add capabilities
     - expression: "variables.containers.all(c, c.name == 'buildkitd' || !has(c.securityContext) || !has(c.securityContext.seccompProfile) || c.securityContext.seccompProfile.type != 'Unconfined')"
       message: only the buildkitd container may run without seccomp
+    - expression: "!has(object.spec.securityContext) || !has(object.spec.securityContext.seccompProfile) || object.spec.securityContext.seccompProfile.type != 'Unconfined'"
+      message: build pods must not disable seccomp for every container
     - expression: "variables.containers.all(c, c.name == 'buildkitd' || !has(c.securityContext) || !has(c.securityContext.appArmorProfile) || c.securityContext.appArmorProfile.type != 'Unconfined') && (!has(object.spec.securityContext) || !has(object.spec.securityContext.appArmorProfile) || object.spec.securityContext.appArmorProfile.type != 'Unconfined')"
       message: only the buildkitd container may run without AppArmor
     - expression: "variables.containers.all(c, c.name != 'buildkitd' || c.image.contains('@sha256:'))"
       message: buildkitd must be pinned by digest
-    - expression: "(has(object.spec.hostUsers) && object.spec.hostUsers == false) || variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.runAsUser) || c.securityContext.runAsUser != 0)"
+    - expression: "(has(object.spec.hostUsers) && object.spec.hostUsers == false) || ((!has(object.spec.securityContext) || !has(object.spec.securityContext.runAsUser) || object.spec.securityContext.runAsUser != 0) && variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.runAsUser) || c.securityContext.runAsUser != 0))"
       message: an explicit runAsUser of 0 is only allowed inside a user namespace
     - expression: "variables.containers.all(c, c.name == 'buildkitd' || c.name.startsWith('test-') || c.name.startsWith('verify-') || (has(c.securityContext) && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation == false))"
       message: Kiln's own build containers must not escalate privileges

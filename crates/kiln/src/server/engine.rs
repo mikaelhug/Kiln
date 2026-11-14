@@ -668,7 +668,9 @@ impl<P: Platform> Engine<P> {
 
     async fn launch(&self, build: &Build) -> Result<()> {
         let repo = self.store.repo(build.repo_id)?.context("the repository is gone")?;
-        let text = build.config.clone().context("the build has no configuration")?;
+        let text = build.config.clone().ok_or_else(|| {
+            Refusal::config(format!("{FILE_NAME} is missing or larger than {} bytes", config::MAX_FILE_BYTES))
+        })?;
         let config = config::parse(&text, &repo.name).map_err(|d| Refusal::config(render_diagnostics(&d)))?;
         let names: Vec<String> = config.images.iter().map(|i| i.name.clone()).collect();
         let pull_request = build.trigger == Trigger::PullRequest;
@@ -1232,14 +1234,19 @@ impl<P: Platform> Engine<P> {
                     let mut offset = 0i64;
                     let mut pending: Vec<u8> = Vec::new();
                     let mut ended = false;
+                    let mut mid_line = false;
                     while !ended {
                         match stream.next().await {
                             Some(Ok(bytes)) => pending.extend_from_slice(&bytes),
                             _ => ended = true,
                         }
                         let cut = match pending.iter().rposition(|b| *b == b'\n') {
-                            _ if ended || pending.len() >= 64 * 1024 => pending.len(),
+                            _ if ended => pending.len(),
                             Some(index) => index + 1,
+                            None if pending.len() >= 64 * 1024 => match std::str::from_utf8(&pending) {
+                                Err(error) if error.error_len().is_none() => error.valid_up_to(),
+                                _ => pending.len(),
+                            },
                             None => 0,
                         };
                         if cut == 0 {
@@ -1251,11 +1258,14 @@ impl<P: Platform> Engine<P> {
                         if finalized.contains(&(build_id, attempt, ordinal)) {
                             break;
                         }
-                        for line in text.lines() {
-                            if let Some(marker) = parse_marker(line) {
+                        for (index, line) in text.lines().enumerate() {
+                            if (index > 0 || !mid_line)
+                                && let Some(marker) = parse_marker(line)
+                            {
                                 engine.apply_marker(build_id, attempt, ordinal, kind, &marker, offset);
                             }
                         }
+                        mid_line = !text.ends_with('\n');
                         offset += bytes.len() as i64;
                         if let Err(error) = engine.logs.append(build_id, attempt, ordinal, &text) {
                             tracing::warn!(%error, "writing a live log failed");

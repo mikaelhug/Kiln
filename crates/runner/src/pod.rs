@@ -470,7 +470,7 @@ impl Builder<'_> {
         spec.cache
             .iter()
             .map(|path| {
-                let key = crate::resource_name("", path);
+                let key = crate::path_key(path);
                 json!({ "name": "cache", "mountPath": absolute(path), "subPath": format!("{lane}/{job}/{key}") })
             })
             .collect()
