@@ -102,6 +102,7 @@ impl Settings {
             kiln_image: required("KILN_IMAGE")?,
             buildkit_image: required("KILN_BUILDKIT_IMAGE")?,
             buildkit_args: list("KILN_BUILDKIT_ARGS"),
+            buildkit_rootless: var("KILN_BUILDKIT_ROOTLESS").is_none_or(|v| v != "false"),
             registry: registry.clone(),
             registry_url: var("KILN_REGISTRY_URL").unwrap_or_else(|| format!("https://{registry_host}")),
             github_api: github_api.clone(),

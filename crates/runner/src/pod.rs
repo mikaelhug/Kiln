@@ -20,6 +20,7 @@ pub struct Settings {
     pub kiln_image: String,
     pub buildkit_image: String,
     pub buildkit_args: Vec<String>,
+    pub buildkit_rootless: bool,
     pub registry: String,
     pub registry_url: String,
     pub github_api: String,
@@ -45,6 +46,7 @@ impl Settings {
             buildkit_image: "moby/buildkit@sha256:2222222222222222222222222222222222222222222222222222222222222222"
                 .into(),
             buildkit_args: vec!["--oci-worker-no-process-sandbox".into()],
+            buildkit_rootless: true,
             registry: "ghcr.io/example".into(),
             registry_url: "https://ghcr.io".into(),
             github_api: "https://api.github.com".into(),
@@ -316,10 +318,13 @@ impl Builder<'_> {
             vec![format!("--addr=unix://{BUILDKIT_SOCKET}/buildkitd.sock"), "--oci-worker-net=host".to_owned()];
         args.extend(self.settings.buildkit_args.iter().cloned());
         let mut buildkit_mounts = vec![json!({ "name": "buildkit-run", "mountPath": BUILDKIT_SOCKET })];
+        let (buildkit_state, buildkit_user) = if self.settings.buildkit_rootless {
+            ("/home/user/.local/share/buildkit", 1000)
+        } else {
+            ("/var/lib/buildkit", 0)
+        };
         if self.plan.cache_claim.is_some() {
-            buildkit_mounts.push(
-                json!({ "name": "cache", "mountPath": "/home/user/.local/share/buildkit", "subPath": "buildkit" }),
-            );
+            buildkit_mounts.push(json!({ "name": "cache", "mountPath": buildkit_state, "subPath": "buildkit" }));
         }
         self.init.push(json!({
             "name": "buildkitd",
@@ -335,8 +340,8 @@ impl Builder<'_> {
             },
             "resources": self.resources(&Resources { cpu: None, memory: None }),
             "securityContext": {
-                "runAsUser": 1000,
-                "runAsGroup": 1000,
+                "runAsUser": buildkit_user,
+                "runAsGroup": buildkit_user,
                 "seccompProfile": { "type": "Unconfined" },
                 "appArmorProfile": { "type": "Unconfined" },
             },

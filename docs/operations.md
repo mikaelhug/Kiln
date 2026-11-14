@@ -39,7 +39,12 @@ Builds run in `kiln-builds`. Each build pod runs a rootless BuildKit daemon as a
 
 **User namespaces.** Rootless BuildKit and `hostUsers: false` need user namespaces. Some distributions turn them off; on Talos, set the sysctl `user.max_user_namespaces` (for example `11255`) on every node. Without them, set `KILN_USER_NAMESPACES=false` and expect weaker isolation of test containers.
 
-**BuildKit mode.** Start with the rootless image (`moby/buildkit:<version>-rootless`, pinned by digest) and `KILN_BUILDKIT_ARGS=--oci-worker-no-process-sandbox`. Verify on your cluster that:
+**BuildKit mode.** Kiln supports two ways to run BuildKit, chosen with `KILN_BUILDKIT_ROOTLESS`:
+
+- `true` (default): the rootless image as uid 1000. rootlesskit needs `newuidmap`, a subuid range inside the pod's user namespace, and privilege escalation for that one container.
+- `false`: the regular image as uid 0. With `KILN_USER_NAMESPACES=true` that uid 0 is unprivileged on the node, which is often the simpler choice on clusters with user namespaces.
+
+Pin the image by digest (`moby/buildkit:<version>-rootless` or `moby/buildkit:<version>`) and start with `KILN_BUILDKIT_ARGS=--oci-worker-no-process-sandbox`. Verify on your cluster that:
 1. a build of a simple Dockerfile works;
 2. a second build reuses the cache;
 3. builds finish at your pod network MTU. Kiln runs BuildKit with `--oci-worker-net=host`, so `RUN` steps inherit the pod's MTU.
@@ -95,6 +100,7 @@ Values marked *file* can also be given as `<NAME>_FILE` pointing at a mounted se
 | `KILN_IMAGE` | required | Kiln's own image, pinned by digest, used for the in-pod helpers |
 | `KILN_BUILDKIT_IMAGE` | required | pinned BuildKit image |
 | `KILN_BUILDKIT_ARGS` | | extra `buildkitd` flags, comma-separated |
+| `KILN_BUILDKIT_ROOTLESS` | `true` | run BuildKit as uid 1000 with the rootless image, or as uid 0 inside the pod's user namespace |
 | `KILN_BUILD_NAMESPACE` | `kiln-builds` | |
 | `KILN_PULL_SECRET` | | image pull secret in the build namespace |
 | `KILN_PUSH_SECRET` | `kiln-registry-push` | Secret with `username` and `password` used by the push container |
