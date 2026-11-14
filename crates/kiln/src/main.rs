@@ -65,6 +65,8 @@ enum Commands {
     Demo {
         #[arg(long, default_value_t = 8080)]
         port: u16,
+        #[arg(long, default_value = "127.0.0.1", help = "Address to listen on; use 0.0.0.0 inside a container")]
+        bind: std::net::IpAddr,
     },
     #[command(hide = true, subcommand)]
     Helper(helper::Helper),
@@ -80,7 +82,7 @@ async fn main() -> ExitCode {
             setup::run(setup::Options { url, org, name, out, port, browser: !no_browser, github, api }).await
         }
         Commands::Serve => server::serve().await.map(|()| ExitCode::SUCCESS),
-        Commands::Demo { port } => server::demo(port).await.map(|()| ExitCode::SUCCESS),
+        Commands::Demo { port, bind } => server::demo(bind, port).await.map(|()| ExitCode::SUCCESS),
         Commands::Helper(command) => helper::run(command).await,
     };
     match result {

@@ -82,7 +82,7 @@ fn sha(seed: u64) -> String {
         .collect()
 }
 
-pub async fn demo(port: u16) -> Result<()> {
+pub async fn demo(bind: std::net::IpAddr, port: u16) -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
@@ -90,7 +90,7 @@ pub async fn demo(port: u16) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     let public_url = format!("http://localhost:{port}");
     let mut settings = Settings::local(dir.clone(), &public_url);
-    settings.listen = ([127, 0, 0, 1], port).into();
+    settings.listen = (bind, port).into();
     settings.poll_secs = 15;
     let settings = Arc::new(settings);
     let fake = Arc::new(Fake::new(Pace::demo()));
