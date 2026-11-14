@@ -72,6 +72,7 @@ pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
         .route("/{owner}/{repo}/pause", post(pause::<P>))
         .route("/{owner}/{repo}/resume", post(resume::<P>))
         .route("/{owner}/{repo}/reset-cache", post(reset_cache::<P>))
+        .route("/{owner}/{repo}/dismiss-drift", post(dismiss_drift::<P>))
         .route("/{owner}/{repo}/builds/{number}", get(build_page::<P>))
         .route("/{owner}/{repo}/builds/{number}/cancel", post(cancel::<P>))
         .route("/{owner}/{repo}/builds/{number}/rerun", post(rerun::<P>))
@@ -483,6 +484,18 @@ async fn reset_cache<P: Platform>(
         Err(error) => format!("Could not reset the cache: {error:#}"),
     };
     Ok(flash(&views::repo_path(&repo), &message))
+}
+
+async fn dismiss_drift<P: Platform>(
+    State(web): State<Arc<Web<P>>>,
+    user: User,
+    headers: HeaderMap,
+    Path((owner, name)): Path<(String, String)>,
+) -> WebResult<Response> {
+    same_origin(&web, &headers)?;
+    let repo = repo_named(&web, &owner, &name)?;
+    web.engine.dismiss_drift(repo.id, &user.login)?;
+    Ok(flash(&views::repo_path(&repo), "Dismissed"))
 }
 
 async fn cancel<P: Platform>(

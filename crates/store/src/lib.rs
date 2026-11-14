@@ -140,6 +140,40 @@ impl Store {
         Ok(())
     }
 
+    pub fn record_release(&self, repo: i64, image: &str, tag: &str, now: i64) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO registry_tags (repo_id, image, tag, by_kiln, first_seen) VALUES (?1, ?2, ?3, 1, ?4)
+             ON CONFLICT(repo_id, image, tag) DO UPDATE SET by_kiln = 1",
+            params![repo, image, tag, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn note_registry_tags(&self, repo: i64, image: &str, tags: &[String], now: i64) -> Result<Vec<String>> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let baseline = tx
+            .execute("INSERT OR IGNORE INTO registry_scans (repo_id, image) VALUES (?1, ?2)", params![repo, image])?
+            == 1;
+        let mut unknown = Vec::new();
+        for tag in tags {
+            let inserted = tx.execute(
+                "INSERT OR IGNORE INTO registry_tags (repo_id, image, tag, by_kiln, first_seen) VALUES (?1, ?2, ?3, 0, ?4)",
+                params![repo, image, tag, now],
+            )?;
+            if inserted == 1 && !baseline {
+                unknown.push(tag.clone());
+            }
+        }
+        tx.commit()?;
+        Ok(unknown)
+    }
+
+    pub fn set_drift(&self, repo: i64, drift: Option<&str>) -> Result<()> {
+        self.conn().execute("UPDATE repos SET drift = ?2 WHERE id = ?1", params![repo, drift])?;
+        Ok(())
+    }
+
     pub fn tags_seen(&self, repo: i64) -> Result<Vec<String>> {
         let conn = self.conn();
         let mut statement = conn.prepare("SELECT name FROM seen_tags WHERE repo_id = ?1")?;
@@ -657,7 +691,7 @@ impl Store {
 }
 
 const REPO_COLUMNS: &str = "id, installation_id, owner, name, default_branch, private, archived, enrolled, paused, \
-     etag_head, etag_tags, etag_pulls, head_sha, rc_high_water, config_error, last_seen_at, removed_at";
+     etag_head, etag_tags, etag_pulls, head_sha, rc_high_water, config_error, last_seen_at, removed_at, drift";
 
 fn repo_from_row(row: &Row<'_>) -> rusqlite::Result<Repo> {
     Ok(Repo {
@@ -678,6 +712,7 @@ fn repo_from_row(row: &Row<'_>) -> rusqlite::Result<Repo> {
         config_error: row.get(14)?,
         last_seen_at: row.get(15)?,
         removed_at: row.get(16)?,
+        drift: row.get(17)?,
     })
 }
 

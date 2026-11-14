@@ -2,7 +2,8 @@ use rusqlite::Connection;
 
 use crate::{Error, Result};
 
-const MIGRATIONS: &[&str] = &[r"
+const MIGRATIONS: &[&str] = &[
+    r"
 CREATE TABLE repos (
     id INTEGER PRIMARY KEY,
     installation_id INTEGER NOT NULL,
@@ -141,7 +142,24 @@ CREATE TABLE audit (
     build_id INTEGER,
     detail TEXT
 );
-"];
+",
+    r"
+CREATE TABLE registry_tags (
+    repo_id INTEGER NOT NULL REFERENCES repos (id),
+    image TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    by_kiln INTEGER NOT NULL,
+    first_seen INTEGER NOT NULL,
+    PRIMARY KEY (repo_id, image, tag)
+);
+CREATE TABLE registry_scans (
+    repo_id INTEGER NOT NULL REFERENCES repos (id),
+    image TEXT NOT NULL,
+    PRIMARY KEY (repo_id, image)
+);
+ALTER TABLE repos ADD COLUMN drift TEXT;
+",
+];
 
 pub fn migrate(conn: &Connection) -> Result<()> {
     let current: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;

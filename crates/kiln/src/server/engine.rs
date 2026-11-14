@@ -946,6 +946,7 @@ impl<P: Platform> Engine<P> {
             }
             let digest = image.digest.clone().with_context(|| format!("{} has no candidate digest", image.name))?;
             let repository = self.settings.repository_for(&image.name);
+            self.store.record_release(build.repo_id, &image.name, &version, now())?;
             match self.platform.promote(&repository, &digest, &version).await {
                 Ok(Promotion::Created | Promotion::AlreadyThere) => {
                     self.store.set_released(id, &image.name, &version)?;
@@ -1268,8 +1269,52 @@ impl<P: Platform> Engine<P> {
                 if let Err(error) = self.prune().await {
                     tracing::warn!(error = format!("{error:#}"), "housekeeping failed");
                 }
+                if let Err(error) = self.scan_registry().await {
+                    tracing::warn!(error = format!("{error:#}"), "checking the registry for outside releases failed");
+                }
             }
         }
+    }
+
+    pub async fn scan_registry(&self) -> Result<()> {
+        for repo in self.store.repos()?.into_iter().filter(|r| r.enrolled && r.removed_at.is_none()) {
+            let latest = self.store.builds(&BuildFilter { repo: Some(repo.id), limit: 20, ..Default::default() })?;
+            let Some(config) = latest
+                .iter()
+                .filter(|b| b.trigger != Trigger::PullRequest)
+                .find_map(|b| b.config.as_deref().and_then(|text| config::parse(text, &repo.name).ok()))
+            else {
+                continue;
+            };
+            let mut outside = Vec::new();
+            for image in &config.images {
+                let tags: Vec<String> = self
+                    .platform
+                    .registry_tags(&self.settings.repository_for(&image.name))
+                    .await?
+                    .into_iter()
+                    .filter(|tag| semver::Version::parse(tag).is_ok())
+                    .collect();
+                for tag in self.store.note_registry_tags(repo.id, &image.name, &tags, now())? {
+                    outside.push(format!("{}:{tag}", image.name));
+                }
+            }
+            if !outside.is_empty() {
+                let mut message = repo.drift.clone().map(|d| format!("{d}, ")).unwrap_or_default();
+                message.push_str(&outside.join(", "));
+                self.store.set_drift(repo.id, Some(&message))?;
+                self.audit("kiln", "registry_drift", Some(repo.id), None, Some(outside.join(", ")));
+                let _ = self.logs.events().send(Event::Repo { repo: repo.id });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn dismiss_drift(&self, repo: i64, actor: &str) -> Result<()> {
+        self.store.set_drift(repo, None)?;
+        self.audit(actor, "registry_drift_dismissed", Some(repo), None, None);
+        let _ = self.logs.events().send(Event::Repo { repo });
+        Ok(())
     }
 
     async fn prune(&self) -> Result<()> {

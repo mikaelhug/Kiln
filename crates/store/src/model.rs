@@ -145,6 +145,7 @@ pub struct Repo {
     pub config_error: Option<String>,
     pub last_seen_at: Option<i64>,
     pub removed_at: Option<i64>,
+    pub drift: Option<String>,
 }
 
 impl Repo {

@@ -366,6 +366,7 @@ pub fn dashboard_live(data: &DashboardData) -> Markup {
                                         a class="title" href=(repo_path(repo)) { (repo.name) }
                                         div class="meta" {
                                             @if repo.paused { span class="pill warn" { "paused" } }
+                                            @if repo.drift.is_some() { span class="pill warn" { "outside release" } }
                                             @if repo.config_error.is_some() { span class="pill bad" { "config error" } }
                                             @if let Some(version) = version { span class="pill" { (version) } }
                                             @if let Some(build) = build { (time(build.created_at)) }
@@ -513,6 +514,16 @@ pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
         }
         @if repo.paused {
             div class="banner warn" { (icon(Icon::Pause)) div class="text" { strong { "Paused" } "Kiln ignores new pushes, tags and pull requests here until you resume." } }
+        }
+        @if let Some(drift) = &repo.drift {
+            div class="banner warn" {
+                (icon(Icon::Alert))
+                div class="text" {
+                    strong { "Published outside Kiln" }
+                    "These versions appeared in the registry without a Kiln release: " code { (drift) } ". If another CI still publishes this repository, remove it; otherwise check who holds the registry credential."
+                    form method="post" action={(repo_path(repo)) "/dismiss-drift"} style="margin-top:8px" { button class="button" type="submit" { "Dismiss" } }
+                }
+            }
         }
         @if let Some(error) = &repo.config_error {
             div class="banner bad" { (icon(Icon::Alert)) div class="text" { strong { (FILE_NAME) " on " (repo.default_branch) " has errors" } pre { (error) } } }

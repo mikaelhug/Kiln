@@ -196,3 +196,16 @@ async fn an_invalid_config_fails_with_annotations_and_skip_ci_is_honoured() {
     let builds = h.until("the skipped build", |b| b.len() == 2).await;
     assert_eq!(builds[1].state, BuildState::Skipped);
 }
+
+#[tokio::test]
+async fn versions_published_outside_kiln_are_flagged_but_existing_ones_are_not() {
+    let h = harness().await;
+    h.fake.push(1, &sha(1), "Ship", Some(CONFIG));
+    h.sync().await;
+    h.until("the release", |b| b.first().is_some_and(|b| b.state == BuildState::Succeeded)).await;
+    h.engine.scan_registry().await.unwrap();
+    assert_eq!(h.engine.store.repo(1).unwrap().unwrap().drift, None, "the baseline and Kiln's own release are known");
+    h.fake.publish("kiln-demo/web", "0.0.2", "sha256:elsewhere");
+    h.engine.scan_registry().await.unwrap();
+    assert_eq!(h.engine.store.repo(1).unwrap().unwrap().drift.as_deref(), Some("web:0.0.2"));
+}
