@@ -1,0 +1,315 @@
+{
+  "$defs": {
+    "Image": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "context": {
+          "default": ".",
+          "type": "string"
+        },
+        "file": {
+          "default": "Dockerfile",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "platforms": {
+          "default": [
+            "linux/amd64"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "secrets": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "target": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Job": {
+      "additionalProperties": false,
+      "properties": {
+        "cache": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "image": {
+          "type": "string"
+        },
+        "resources": {
+          "$ref": "#/$defs/Resources"
+        },
+        "secrets": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/$defs/Service"
+          },
+          "type": "array"
+        },
+        "setup": {
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "image",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "Release": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/ReleaseMode"
+        },
+        "shadow": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ReleaseMode": {
+      "enum": [
+        "rc",
+        "tags"
+      ],
+      "type": "string"
+    },
+    "Resources": {
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Service": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "expect_exit": {
+          "default": null,
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "image": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mounts": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "read_only": {
+          "default": false,
+          "type": "boolean"
+        },
+        "secrets": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tmpfs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "user": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Step": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "run": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "run"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Triggers": {
+      "additionalProperties": false,
+      "properties": {
+        "pull_request": {
+          "default": true,
+          "type": "boolean"
+        },
+        "push": {
+          "default": true,
+          "type": "boolean"
+        },
+        "tags": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "images": {
+      "items": {
+        "$ref": "#/$defs/Image"
+      },
+      "type": "array"
+    },
+    "on": {
+      "$ref": "#/$defs/Triggers"
+    },
+    "release": {
+      "$ref": "#/$defs/Release"
+    },
+    "test": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Job"
+      },
+      "type": "object"
+    },
+    "verify": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Job"
+      },
+      "type": "object"
+    },
+    "version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "title": "Config",
+  "type": "object"
+}
