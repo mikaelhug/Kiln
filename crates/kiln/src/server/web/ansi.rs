@@ -1,9 +1,41 @@
 use maud::{Markup, html};
 
-pub fn line(raw: &str) -> Markup {
+pub fn line(task: i64, number: usize, raw: &str) -> Markup {
     let visible = raw.rsplit('\r').find(|part| !part.is_empty()).unwrap_or("");
-    let class = if visible.starts_with("$ ") { "line cmd" } else { "line" };
-    html! { div class=(class) { (spans(visible)) } }
+    let class = if visible.starts_with("$ ") {
+        "line cmd"
+    } else if is_error(&strip(visible)) {
+        "line err"
+    } else {
+        "line"
+    };
+    let anchor = format!("task-{task}-L{number}");
+    html! { div class=(class) id=(anchor) { a class="ln" href={"#" (anchor)} { (number) } span class="tx" { (spans(visible)) } } }
+}
+
+fn strip(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            for next in chars.by_ref() {
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn is_error(text: &str) -> bool {
+    let lower = text.trim_start().to_lowercase();
+    ["error", "fatal", "panic", "✗", "×", "✕"].iter().any(|p| lower.starts_with(p))
+        || lower.contains("error:")
+        || lower.contains("error[")
+        || text.split(|c: char| !c.is_ascii_alphabetic()).any(|w| w == "FAIL" || w == "FAILED")
 }
 
 fn spans(text: &str) -> Markup {
@@ -73,9 +105,9 @@ mod tests {
 
     #[test]
     fn colours_are_rendered_and_markup_is_escaped() {
-        let rendered = line("\u{1b}[1;32m✓ passed\u{1b}[0m <script>").into_string();
-        assert_eq!(rendered, r#"<div class="line"><span class="a-b a-32">✓ passed</span> &lt;script&gt;</div>"#);
-        let progress = line("downloading 10%\rdownloading 100%").into_string();
+        let rendered = line(2, 7, "\u{1b}[1;32m✓ passed\u{1b}[0m <script>").into_string();
+        assert!(rendered.contains(r#"<span class="tx"><span class="a-b a-32">✓ passed</span> &lt;script&gt;</span>"#));
+        let progress = line(2, 8, "downloading 10%\rdownloading 100%").into_string();
         assert!(progress.contains("downloading 100%") && !progress.contains("10%"));
     }
 }

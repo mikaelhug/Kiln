@@ -70,6 +70,7 @@ fn icon(state: TaskState) -> &'static str {
 pub fn duration(seconds: i64) -> String {
     match seconds {
         s if s < 60 => format!("{s}s"),
+        s if s < 3600 && s % 60 == 0 => format!("{}m", s / 60),
         s if s < 3600 => format!("{}m {}s", s / 60, s % 60),
         s => format!("{}h {}m", s / 3600, (s % 3600) / 60),
     }

@@ -1,5 +1,5 @@
 use kiln_core::config::{self, Config, FILE_NAME, ReleaseMode};
-use kiln_store::{AuditEntry, Build, BuildState, ImageRecord, Repo, Task, TaskKind, TaskState, Trigger};
+use kiln_store::{AuditEntry, Build, BuildState, Failure, ImageRecord, Repo, Task, TaskKind, TaskState, Trigger};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use super::super::checks::{duration, headline, phase_label, task_title};
@@ -25,6 +25,7 @@ pub struct Context<'a> {
     pub demo: bool,
 }
 
+#[derive(Clone, Copy)]
 pub enum Icon {
     Check,
     Cross,
@@ -43,22 +44,40 @@ pub enum Icon {
     Tag,
     Branch,
     Pull,
-    Hand,
+    Search,
+    Box,
+    Activity,
+    Book,
+    Server,
+    Copy,
+    Chevron,
+    LogOut,
+    Wrap,
+    Expand,
+    Download,
+    ArrowDown,
+    Timer,
+    Commit,
+    User,
+    More,
+    Gauge,
+    Layers,
+    Rocket,
 }
 
 pub fn icon(icon: Icon) -> Markup {
     let path = match icon {
-        Icon::Check => r#"<path d="M4 10.5l3.5 3.5L16 6"/>"#,
-        Icon::Cross => r#"<path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/>"#,
-        Icon::Spinner => r#"<path d="M10 3a7 7 0 1 1-7 7"/>"#,
+        Icon::Check => r#"<path d="M4.5 10.5l3.5 3.5 7.5-8"/>"#,
+        Icon::Cross => r#"<path d="M6 6l8 8M14 6l-8 8"/>"#,
+        Icon::Spinner => r#"<path d="M10 2.5a7.5 7.5 0 0 1 7.5 7.5"/>"#,
         Icon::Clock => r#"<circle cx="10" cy="10" r="7"/><path d="M10 6v4l2.5 2"/>"#,
         Icon::Slash => r#"<circle cx="10" cy="10" r="7"/><path d="M5.5 14.5l9-9"/>"#,
-        Icon::Skip => r#"<path d="M5 5l6 5-6 5zM14 5v10"/>"#,
-        Icon::Alert => r#"<path d="M10 3l8 14H2z"/><path d="M10 8v4M10 14.5v.5"/>"#,
-        Icon::Play => r#"<path d="M6 4l10 6-10 6z"/>"#,
-        Icon::Pause => r#"<path d="M7 4v12M13 4v12"/>"#,
+        Icon::Skip => r#"<path d="M5 10h10"/>"#,
+        Icon::Alert => r#"<path d="M10 3l8 14H2z"/><path d="M10 8.5v3.5M10 14.5v.01"/>"#,
+        Icon::Play => r#"<path d="M6.5 4.5l9 5.5-9 5.5z"/>"#,
+        Icon::Pause => r#"<path d="M7 4.5v11M13 4.5v11"/>"#,
         Icon::Rerun => r#"<path d="M15.5 8A6 6 0 1 0 16 12"/><path d="M16 4v4h-4"/>"#,
-        Icon::Stop => r#"<rect x="5" y="5" width="10" height="10" rx="1.5"/>"#,
+        Icon::Stop => r#"<rect x="5.5" y="5.5" width="9" height="9" rx="1.5"/>"#,
         Icon::Refresh => {
             r#"<path d="M4 10a6 6 0 0 1 10.5-4L16 7.5M16 10a6 6 0 0 1-10.5 4L4 12.5"/><path d="M16 4v3.5h-3.5M4 16v-3.5h3.5"/>"#
         }
@@ -66,29 +85,54 @@ pub fn icon(icon: Icon) -> Markup {
         Icon::External => r#"<path d="M11 4h5v5M16 4l-7 7M14 12v4H4V6h4"/>"#,
         Icon::Tag => r#"<path d="M3 3h7l7 7-7 7-7-7z"/><circle cx="7" cy="7" r="1.2"/>"#,
         Icon::Branch => {
-            r#"<circle cx="6" cy="5" r="2"/><circle cx="6" cy="15" r="2"/><circle cx="14" cy="8" r="2"/><path d="M6 7v6M14 10c0 2-2 3-8 3"/>"#
+            r#"<circle cx="6" cy="5" r="2"/><circle cx="6" cy="15" r="2"/><circle cx="14" cy="7" r="2"/><path d="M6 7v6M14 9c0 2.5-2 3.5-8 4"/>"#
         }
         Icon::Pull => {
-            r#"<circle cx="6" cy="5" r="2"/><circle cx="6" cy="15" r="2"/><circle cx="14" cy="15" r="2"/><path d="M6 7v6M14 13V8a2 2 0 0 0-2-2H9"/>"#
+            r#"<circle cx="6" cy="5" r="2"/><circle cx="6" cy="15" r="2"/><circle cx="14" cy="15" r="2"/><path d="M6 7v6M14 13V8a2 2 0 0 0-2-2H9"/><path d="M10.5 4L9 6l1.5 2"/>"#
         }
-        Icon::Hand => {
-            r#"<path d="M7 10V5a1.5 1.5 0 0 1 3 0v4M10 9V4a1.5 1.5 0 0 1 3 0v6M13 9a1.5 1.5 0 0 1 3 0v3a5 5 0 0 1-5 5H9a5 5 0 0 1-4-2l-2-3a1.5 1.5 0 0 1 2.5-1.5L7 12"/>"#
+        Icon::Search => r#"<circle cx="9" cy="9" r="5.5"/><path d="M13 13l4 4"/>"#,
+        Icon::Box => r#"<path d="M3 6.5L10 3l7 3.5v7L10 17l-7-3.5z"/><path d="M3 6.5L10 10l7-3.5M10 10v7"/>"#,
+        Icon::Activity => r#"<path d="M2 10h3.5l2-5 4 10 2-5H18"/>"#,
+        Icon::Book => {
+            r#"<path d="M4 15.5V4.5A1.5 1.5 0 0 1 5.5 3H16v11.5H5.5A1.5 1.5 0 0 0 4 16v0a1.5 1.5 0 0 0 1.5 1.5H16"/>"#
+        }
+        Icon::Server => {
+            r#"<rect x="3" y="3.5" width="14" height="5.5" rx="1.5"/><rect x="3" y="11" width="14" height="5.5" rx="1.5"/><path d="M6.5 6.25h.01M6.5 13.75h.01"/>"#
+        }
+        Icon::Copy => {
+            r#"<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M13 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/>"#
+        }
+        Icon::Chevron => r#"<path d="M8 5l5 5-5 5"/>"#,
+        Icon::LogOut => r#"<path d="M8 17H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3M13 14l4-4-4-4M17 10H8"/>"#,
+        Icon::Wrap => r#"<path d="M3 5h14M3 10h11a3 3 0 0 1 0 6h-4M3 15h4"/><path d="M12 14l-2 2 2 2"/>"#,
+        Icon::Expand => r#"<path d="M6 8l4-4 4 4M6 12l4 4 4-4"/>"#,
+        Icon::Download => r#"<path d="M10 3v10M6 9l4 4 4-4M4 17h12"/>"#,
+        Icon::ArrowDown => r#"<path d="M10 4v12M5 11l5 5 5-5"/>"#,
+        Icon::Timer => r#"<circle cx="10" cy="11" r="6"/><path d="M10 8v3l2 1M8 2.5h4"/>"#,
+        Icon::Commit => r#"<circle cx="10" cy="10" r="3"/><path d="M2 10h5M13 10h5"/>"#,
+        Icon::User => r#"<circle cx="10" cy="7" r="3"/><path d="M4 17a6 6 0 0 1 12 0"/>"#,
+        Icon::More => r#"<path d="M5 10h.01M10 10h.01M15 10h.01" stroke-width="2.6"/>"#,
+        Icon::Gauge => r#"<path d="M3.5 14a7 7 0 1 1 13 0"/><path d="M10 11l3-4"/>"#,
+        Icon::Layers => r#"<path d="M10 3l7 4-7 4-7-4z"/><path d="M3 11l7 4 7-4"/>"#,
+        Icon::Rocket => {
+            r#"<path d="M11.5 14.5L8 11l1-3c1.5-3.5 4-5 8-5 0 4-1.5 6.5-5 8z"/><path d="M8 11l-3 .5L3 9.5l3-1.5M9 12l-.5 3 2 2 1.5-3"/><circle cx="13" cy="7" r="1"/>"#
         }
     };
     PreEscaped(format!(
-        r#"<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{path}</svg>"#
+        r#"<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{path}</svg>"#
     ))
 }
 
-const LOGO: &str = r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21h16"/><path d="M6 21V11a6 6 0 0 1 12 0v10"/><path d="M12 17c-1.7 0-2.5-1.2-2.5-2.4 0-1.6 1.5-2.3 2.5-4.1 1 1.8 2.5 2.5 2.5 4.1 0 1.2-.8 2.4-2.5 2.4z"/></svg>"#;
+const LOGO: &str = r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21h16"/><path d="M6 21V11a6 6 0 0 1 12 0v10"/><path d="M12 17c-1.7 0-2.5-1.2-2.5-2.4 0-1.6 1.5-2.3 2.5-4.1 1 1.8 2.5 2.5 2.5 4.1 0 1.2-.8 2.4-2.5 2.4z"/></svg>"#;
+
+const GITHUB: &str = r#"<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>"#;
 
 pub fn kind(state: BuildState) -> &'static str {
     match state {
         BuildState::Succeeded => "ok",
         BuildState::Failed | BuildState::Errored => "bad",
         BuildState::Starting | BuildState::Running | BuildState::Releasing => "run",
-        BuildState::Queued => "wait",
-        BuildState::Cancelled | BuildState::Superseded | BuildState::Skipped => "wait",
+        BuildState::Queued | BuildState::Cancelled | BuildState::Superseded | BuildState::Skipped => "wait",
     }
 }
 
@@ -129,16 +173,43 @@ fn task_kind(state: TaskState) -> (&'static str, Icon) {
     }
 }
 
+fn task_label(state: TaskState) -> &'static str {
+    match state {
+        TaskState::Passed => "Passed",
+        TaskState::Failed => "Failed",
+        TaskState::TimedOut => "Timed out",
+        TaskState::Running => "Running",
+        TaskState::Cancelled => "Cancelled",
+        TaskState::Skipped => "Skipped",
+        TaskState::Pending => "Waiting",
+    }
+}
+
+fn status(state: BuildState, size: &str) -> Markup {
+    let label = state_label(state);
+    html! { span class={"status " (kind(state)) " " (size)} role="img" aria-label=(label) title=(label) { (icon(state_icon(state))) } }
+}
+
+fn task_status(state: TaskState, size: &str) -> Markup {
+    let (class, glyph) = task_kind(state);
+    let label = task_label(state);
+    html! { span class={"status " (class) " " (size)} role="img" aria-label=(label) title=(label) { (icon(glyph)) } }
+}
+
 pub fn time(seconds: i64) -> Markup {
     html! { time data-time=(seconds) { "" } }
 }
 
-pub fn build_duration(build: &Build) -> Markup {
-    match (build.started_at, build.finished_at) {
-        (Some(start), Some(end)) => html! { span class="duration" { (duration(end - start)) } },
-        (Some(start), None) => html! { span class="duration" data-started=(start) { "" } },
+fn elapsed(started: Option<i64>, finished: Option<i64>) -> Markup {
+    match (started, finished) {
+        (Some(start), Some(end)) => html! { (duration(end - start)) },
+        (Some(start), None) => html! { span data-started=(start) { "" } },
         _ => html! {},
     }
+}
+
+fn released(build: &Build) -> bool {
+    build.state == BuildState::Succeeded && build.detail.as_deref().is_some_and(|d| d.starts_with("Released"))
 }
 
 pub fn trigger_pill(build: &Build) -> Markup {
@@ -146,9 +217,19 @@ pub fn trigger_pill(build: &Build) -> Markup {
         Trigger::Push => html! { span class="pill" { (icon(Icon::Branch)) (build.ref_name) } },
         Trigger::Tag => html! { span class="pill accent" { (icon(Icon::Tag)) (build.ref_name) } },
         Trigger::PullRequest => {
-            html! { span class="pill" { (icon(Icon::Pull)) "PR #" (build.pr_number.unwrap_or_default()) } }
+            html! { span class="pill" { (icon(Icon::Pull)) "#" (build.pr_number.unwrap_or_default()) } }
         }
-        Trigger::Manual => html! { span class="pill" { (icon(Icon::Hand)) (build.ref_name) } },
+        Trigger::Manual => html! { span class="pill" title="Started by hand" { (icon(Icon::Play)) (build.ref_name) } },
+    }
+}
+
+fn version_pill(build: &Build) -> Markup {
+    match &build.version {
+        Some(version) if released(build) => {
+            html! { span class="pill mono ok" title="Released" { (icon(Icon::Tag)) (version) } }
+        }
+        Some(version) => html! { span class="pill mono" title="Version, not released" { (version) } },
+        None => html! {},
     }
 }
 
@@ -165,62 +246,98 @@ fn commit_title(build: &Build) -> String {
     if title.is_empty() { format!("Commit {}", build.short_sha()) } else { title.to_owned() }
 }
 
+fn initial(name: &str) -> String {
+    name.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default()
+}
+
 pub fn build_row(build: &Build, repo: Option<&Repo>, show_repo: bool) -> Markup {
     let href = repo.map(|r| build_path(r, build)).unwrap_or_default();
+    let live = build.state.is_active() || build.state == BuildState::Queued;
+    let failed = kind(build.state) == "bad";
     html! {
-        li class="row" {
-            span class={"state " (kind(build.state))} title=(state_label(build.state)) { (icon(state_icon(build.state))) }
+        li class="build-row" {
+            (status(build.state, ""))
             div class="main" {
-                a class="title" href=(href) { (commit_title(build)) }
-                div class="meta" {
+                a class="title" href=(href) title=(commit_title(build)) { (commit_title(build)) }
+                div class="sub" {
                     @if show_repo { @if let Some(repo) = repo { a href=(repo_path(repo)) { (repo.name) } } }
                     span { "#" (build.number) }
-                    (trigger_pill(build))
-                    code { (build.short_sha()) }
-                    @if let Some(version) = &build.version {
-                        span class={"pill " @if build.state == BuildState::Succeeded && build.detail.as_deref().is_some_and(|d| d.starts_with("Released")) { "ok" }} { (version) }
+                    @if live || failed {
+                        span class="sep" { "·" }
+                        span class={"detail " (kind(build.state))} { (headline(build)) }
+                    } @else if let Some(actor) = &build.actor {
+                        span class="sep" { "·" }
+                        span { (actor) }
                     }
-                    @if let Some(actor) = &build.actor { span { "by " (actor) } }
-                    @if build.state.is_active() || build.state == BuildState::Queued { span { (headline(build)) } }
                 }
             }
-            div class="side" { (time(build.created_at)) (build_duration(build)) }
+            div class="ref" { (trigger_pill(build)) span class="sha" { (build.short_sha()) } }
+            div class="version" { (version_pill(build)) }
+            div class="when" {
+                span class="duration" { (elapsed(build.started_at, build.finished_at)) }
+                (time(build.created_at))
+            }
         }
     }
 }
 
 pub fn layout(title: &str, nav: &str, ctx: &Context<'_>, attrs: &[(&str, String)], content: Markup) -> Markup {
     let data: String = attrs.iter().map(|(k, v)| format!(" data-{k}=\"{}\"", html_escape(v))).collect();
+    let item = |id: &str, href: &str, glyph: Icon, label: &str| {
+        html! { a class=(if nav == id { "active" } else { "" }) href=(href) aria-current=[(nav == id).then_some("page")] { (icon(glyph)) (label) } }
+    };
     html! {
         (DOCTYPE)
         html lang="en" {
-            head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (title) " · Kiln" }
-                link rel="icon" href="/assets/favicon.svg" type="image/svg+xml";
-                link rel="stylesheet" href={"/assets/kiln.css?v=" (*ASSET_VERSION)};
-                script src={"/assets/kiln.js?v=" (*ASSET_VERSION)} defer {}
-            }
+            (head(title))
             (PreEscaped(format!("<body{data}>")))
             header class="topbar" {
                 div class="inner" {
-                    a class="brand plain" href="/" { (PreEscaped(LOGO)) "Kiln" }
-                    nav class="nav" {
-                        a class=(if nav == "builds" { "active" } else { "" }) href="/" { "Builds" }
-                        a class=(if nav == "repos" { "active" } else { "" }) href="/repos" { "Repositories" }
-                        a class=(if nav == "system" { "active" } else { "" }) href="/system" { "System" }
+                    a class="brand" href="/" { span class="mark" { (PreEscaped(LOGO)) } span class="word" { "Kiln" } }
+                    nav class="nav" aria-label="Main" {
+                        (item("builds", "/", Icon::Activity, "Builds"))
+                        (item("repos", "/repos", Icon::Book, "Repositories"))
+                        (item("system", "/system", Icon::Server, "System"))
                     }
-                    div class="user" {
-                        span class="live-dot" title="Live updates" {}
-                        @if !ctx.viewer.avatar_url.is_empty() { img src=(ctx.viewer.avatar_url) alt=""; }
-                        span { (ctx.viewer.login) }
-                        form method="post" action="/logout" { button class="button" type="submit" { "Sign out" } }
+                    div class="right" {
+                        span class="live" title="Live updates" {
+                            span class="dot" {}
+                            span class="state-text connecting" { "Connecting" }
+                            span class="state-text connected" { "Live" }
+                            span class="state-text reconnecting" { "Reconnecting" }
+                        }
+                        details class="menu" {
+                            summary class="avatar" aria-label="Account" {
+                                @if ctx.viewer.avatar_url.is_empty() { (initial(&ctx.viewer.login)) } @else { img src=(ctx.viewer.avatar_url) alt=""; }
+                            }
+                            div class="menu-panel" {
+                                div class="label" { "Signed in as" strong { (ctx.viewer.login) } }
+                                @if ctx.demo { div class="label" { span class="pill warn" { "Demo mode" } } }
+                                hr;
+                                a class="menu-item" href="/system" { (icon(Icon::Server)) "System" }
+                                form method="post" action="/logout" { button class="menu-item" type="submit" { (icon(Icon::LogOut)) "Sign out" } }
+                            }
+                        }
                     }
                 }
             }
             main { (content) }
+            div class="toasts" aria-live="polite" {}
             (PreEscaped("</body>"))
+        }
+    }
+}
+
+fn head(title: &str) -> Markup {
+    html! {
+        head {
+            meta charset="utf-8";
+            meta name="viewport" content="width=device-width, initial-scale=1";
+            meta name="color-scheme" content="light dark";
+            title { (title) " · Kiln" }
+            link rel="icon" href="/assets/favicon.svg" type="image/svg+xml";
+            link rel="stylesheet" href={"/assets/kiln.css?v=" (*ASSET_VERSION)};
+            script src={"/assets/kiln.js?v=" (*ASSET_VERSION)} defer {}
         }
     }
 }
@@ -229,27 +346,36 @@ fn html_escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
+fn empty(glyph: Icon, title: &str, body: Markup) -> Markup {
+    html! { div class="empty" { span class="glyph" { (icon(glyph)) } h3 { (title) } (body) } }
+}
+
+fn refresh_button() -> Markup {
+    html! {
+        form method="post" action="/system/refresh" {
+            button class="button" type="submit" title="Look for new commits, tags and pull requests now" { (icon(Icon::Refresh)) "Check GitHub" }
+        }
+    }
+}
+
 pub fn login(error: Option<&str>, demo: bool) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
-            head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { "Sign in · Kiln" }
-                link rel="icon" href="/assets/favicon.svg" type="image/svg+xml";
-                link rel="stylesheet" href={"/assets/kiln.css?v=" (*ASSET_VERSION)};
-            }
+            (head("Sign in"))
             body {
-                div class="login" {
-                    div class="card" {
-                        div class="brand" { (PreEscaped(LOGO)) "Kiln" }
-                        p { "Self-hosted CI for your private repositories." }
+                div class="auth" {
+                    div class="card auth-card" {
+                        span class="mark" { (PreEscaped(LOGO)) }
+                        h1 { "Sign in to Kiln" }
+                        p { "Builds, tests and releases for your private repositories." }
                         @if let Some(error) = error {
                             div class="banner bad" { (icon(Icon::Alert)) div class="text" { (error) } }
                         }
-                        a class="button primary plain" href="/auth/github" {
-                            @if demo { "Enter the demo" } @else { "Sign in with GitHub" }
+                        @if demo {
+                            a class="button primary" href="/auth/github" { (icon(Icon::Play)) "Enter the demo" }
+                        } @else {
+                            a class="button primary" href="/auth/github" { (PreEscaped(GITHUB)) "Continue with GitHub" }
                         }
                     }
                 }
@@ -259,36 +385,104 @@ pub fn login(error: Option<&str>, demo: bool) -> Markup {
 }
 
 pub fn error_page(ctx: Option<&Context<'_>>, status: u16, message: &str) -> Markup {
+    let title = match status {
+        404 => "Not found",
+        403 => "Not allowed",
+        400 => "Something is off",
+        _ => "Kiln hit an error",
+    };
     let content = html! {
         div class="card" {
-            div class="empty" {
-                h3 { (match status { 404 => "Not found", 403 => "Not allowed", 400 => "Something is off", _ => "Kiln hit an error" }) }
+            (empty(if status == 404 { Icon::Search } else { Icon::Alert }, title, html! {
                 p { (message) }
                 a class="button" href="/" { "Back to builds" }
-            }
+            }))
         }
     };
     match ctx {
-        Some(ctx) => layout("Error", "", ctx, &[], content),
-        None => {
-            html! { (DOCTYPE) html { head { link rel="stylesheet" href="/assets/kiln.css"; } body { main { (content) } } } }
+        Some(ctx) => layout(title, "", ctx, &[], content),
+        None => html! { (DOCTYPE) html lang="en" { (head(title)) body { main { (content) } } } },
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Status {
+    #[default]
+    All,
+    Passed,
+    Failed,
+    Stopped,
+}
+
+impl Status {
+    pub fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("passed") => Status::Passed,
+            Some("failed") => Status::Failed,
+            Some("stopped") => Status::Stopped,
+            _ => Status::All,
+        }
+    }
+
+    pub fn states(self) -> Vec<BuildState> {
+        match self {
+            Status::All => vec![
+                BuildState::Succeeded,
+                BuildState::Failed,
+                BuildState::Errored,
+                BuildState::Cancelled,
+                BuildState::Superseded,
+                BuildState::Skipped,
+            ],
+            Status::Passed => vec![BuildState::Succeeded],
+            Status::Failed => vec![BuildState::Failed, BuildState::Errored],
+            Status::Stopped => vec![BuildState::Cancelled, BuildState::Superseded, BuildState::Skipped],
+        }
+    }
+
+    fn key(self) -> Option<&'static str> {
+        match self {
+            Status::All => None,
+            Status::Passed => Some("passed"),
+            Status::Failed => Some("failed"),
+            Status::Stopped => Some("stopped"),
         }
     }
 }
 
-pub type RepoSummary = (Repo, Option<Build>, Option<String>);
+#[derive(Default)]
+pub struct Stats {
+    pub passed_day: usize,
+    pub failed_day: usize,
+    pub rate: Option<(usize, usize)>,
+    pub median: Option<i64>,
+}
 
 pub struct DashboardData {
     pub repos: Vec<Repo>,
     pub active: Vec<Build>,
     pub queued: Vec<Build>,
-    pub recent: Vec<Build>,
-    pub latest: Vec<RepoSummary>,
+    pub builds: Vec<Build>,
+    pub more: Option<i64>,
+    pub status: Status,
+    pub repo: Option<i64>,
     pub slots: usize,
+    pub stats: Stats,
+}
+
+fn dashboard_query(status: Status, repo: Option<i64>, before: Option<i64>) -> String {
+    let parts: Vec<String> = [
+        status.key().map(|s| format!("status={s}")),
+        repo.map(|r| format!("repo={r}")),
+        before.map(|b| format!("before={b}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if parts.is_empty() { "/".into() } else { format!("/?{}", parts.join("&")) }
 }
 
 pub fn dashboard(ctx: &Context<'_>, data: &DashboardData) -> Markup {
-    let enrolled = data.repos.iter().filter(|r| r.enrolled && r.removed_at.is_none()).count();
     layout(
         "Builds",
         "builds",
@@ -296,19 +490,11 @@ pub fn dashboard(ctx: &Context<'_>, data: &DashboardData) -> Markup {
         &[("page", "dashboard".into())],
         html! {
             div class="page-head" {
-                div {
+                div class="titles" {
                     h1 { "Builds" }
-                    div class="sub" id="stats" {
-                        span { (enrolled) " of " (data.repos.iter().filter(|r| r.removed_at.is_none()).count()) " repositories use Kiln" }
-                        span { "·" }
-                        span { (data.active.len()) " of " (data.slots) " build slots in use" }
-                    }
+                    div class="lede" { "Every build across your repositories" }
                 }
-                div class="actions" {
-                    form method="post" action="/system/refresh" {
-                        button class="button" type="submit" { (icon(Icon::Refresh)) "Check GitHub now" }
-                    }
-                }
+                div class="actions" { (refresh_button()) }
             }
             div id="live" { (dashboard_live(data)) }
         },
@@ -317,59 +503,188 @@ pub fn dashboard(ctx: &Context<'_>, data: &DashboardData) -> Markup {
 
 pub fn dashboard_live(data: &DashboardData) -> Markup {
     let repo = |id: i64| data.repos.iter().find(|r| r.id == id);
-    let enrolled_count = data.repos.iter().filter(|r| r.enrolled && r.removed_at.is_none()).count();
-    let visible = data.repos.iter().filter(|r| r.removed_at.is_none()).count();
-    let enrolled: Vec<&RepoSummary> = data.latest.iter().filter(|(r, _, _)| r.enrolled).collect();
+    let enrolled: Vec<&Repo> = data.repos.iter().filter(|r| r.enrolled && r.removed_at.is_none()).collect();
+    let stats = &data.stats;
+    let day_total = stats.passed_day + stats.failed_day;
     html! {
-        template data-stats {
-            span { (enrolled_count) " of " (visible) " repositories use Kiln" }
-            span { "·" }
-            span { (data.active.len()) " of " (data.slots) " build slots in use" }
-        }
-        div class="grid" {
-            div class="stack" {
-                @if !data.active.is_empty() {
-                    section class="card" {
-                        h2 { "Running" }
-                        ul class="list" { @for build in &data.active { (build_row(build, repo(build.repo_id), true)) } }
-                    }
-                }
-                @if !data.queued.is_empty() {
-                    section class="card" {
-                        h2 { "Waiting for a slot" }
-                        ul class="list" { @for build in &data.queued { (build_row(build, repo(build.repo_id), true)) } }
-                    }
-                }
-                section class="card" {
-                    h2 { "Recent builds" }
-                    @if data.recent.is_empty() {
-                        (onboarding(enrolled.is_empty()))
-                    } @else {
-                        ul class="list" { @for build in &data.recent { (build_row(build, repo(build.repo_id), true)) } }
+        div class="tiles" {
+            div class="card tile" {
+                span class="label" { (icon(Icon::Gauge)) "Build slots" }
+                span class="value" { (data.active.len()) small { "of " (data.slots) " busy" } }
+                div class="meter" { @for slot in 0..data.slots { span class=(if slot < data.active.len() { "on" } else { "" }) {} } }
+            }
+            div class="card tile" {
+                span class="label" { (icon(Icon::Clock)) "Queued" }
+                span class="value" { (data.queued.len()) }
+                span class="foot" {
+                    @match data.queued.first() {
+                        Some(next) => { "Next: " @if let Some(r) = repo(next.repo_id) { (r.name) } " #" (next.number) },
+                        None => "Nothing is waiting",
                     }
                 }
             }
-            aside class="stack" {
+            div class="card tile" {
+                span class="label" { (icon(Icon::Activity)) "Last 24 hours" }
+                span class="value" { (day_total) small { @if day_total == 1 { "build" } @else { "builds" } } }
+                @if day_total > 0 {
+                    div class="split" {
+                        span class="ok" style={"flex:" (stats.passed_day)} {}
+                        span class="bad" style={"flex:" (stats.failed_day)} {}
+                    }
+                    span class="foot" { (stats.passed_day) " passed · " (stats.failed_day) " failed" }
+                } @else {
+                    span class="foot" { "No finished builds" }
+                }
+            }
+            div class="card tile" {
+                span class="label" { (icon(Icon::Check)) "Success rate" }
+                @match stats.rate {
+                    Some((passed, total)) => {
+                        span class={"value " (if passed * 10 >= total * 9 { "ok" } else if passed * 2 < total { "bad" } else { "" })} { (passed * 100 / total.max(1)) "%" }
+                        span class="foot" { "Last " (total) " builds" @if let Some(median) = stats.median { " · median " (duration(median)) } }
+                    },
+                    None => { span class="value" { "–" } span class="foot" { "No finished builds yet" } },
+                }
+            }
+        }
+        div class="stack" {
+            @if !data.active.is_empty() || !data.queued.is_empty() {
                 section class="card" {
-                    h2 { "Repositories" }
+                    div class="card-head" { h2 { "In progress" span class="count" { (data.active.len() + data.queued.len()) } } }
+                    ul class="builds" {
+                        @for build in data.active.iter().chain(&data.queued) { (build_row(build, repo(build.repo_id), true)) }
+                    }
+                }
+            }
+            section class="card" {
+                div class="card-head" {
+                    h2 { "History" }
+                    div class="tools" {
+                        nav class="segmented" aria-label="Filter by result" {
+                            @for (status, label) in [(Status::All, "All"), (Status::Passed, "Passed"), (Status::Failed, "Failed"), (Status::Stopped, "Cancelled")] {
+                                a class=(if status == data.status { "active" } else { "" }) href=(dashboard_query(status, data.repo, None)) { (label) }
+                            }
+                        }
+                        @if enrolled.len() > 1 {
+                            form class="filters" method="get" action="/" {
+                                @if let Some(key) = data.status.key() { input type="hidden" name="status" value=(key); }
+                                select class="select" name="repo" aria-label="Repository" data-autosubmit {
+                                    option value="" { "All repositories" }
+                                    @for r in &enrolled { option value=(r.id) selected[data.repo == Some(r.id)] { (r.name) } }
+                                }
+                                noscript { button class="button small" type="submit" { "Apply" } }
+                            }
+                        }
+                    }
+                }
+                @if data.builds.is_empty() {
                     @if enrolled.is_empty() {
-                        div class="empty" { p { "No repository has a " code { (FILE_NAME) } " yet." } a href="/repos" { "See all repositories" } }
+                        (onboarding())
+                    } @else if data.status != Status::All || data.repo.is_some() {
+                        (empty(Icon::Search, "No matching builds", html! { a class="button small" href="/" { "Clear filters" } }))
                     } @else {
-                        ul class="list" {
-                            @for (repo, build, version) in &enrolled {
-                                li class="row" {
-                                    @match build {
-                                        Some(build) => span class={"state " (kind(build.state))} title=(state_label(build.state)) { (icon(state_icon(build.state))) },
-                                        None => span class="state wait" { (icon(Icon::Clock)) },
-                                    }
-                                    div class="main" {
-                                        a class="title" href=(repo_path(repo)) { (repo.name) }
-                                        div class="meta" {
-                                            @if repo.paused { span class="pill warn" { "paused" } }
-                                            @if repo.drift.is_some() { span class="pill warn" { "outside release" } }
-                                            @if repo.config_error.is_some() { span class="pill bad" { "config error" } }
-                                            @if let Some(version) = version { span class="pill" { (version) } }
-                                            @if let Some(build) = build { (time(build.created_at)) }
+                        (empty(Icon::Activity, "No builds yet", html! { p { "Builds appear here when you push to a repository that uses Kiln." } }))
+                    }
+                } @else {
+                    ul class="builds" { @for build in &data.builds { (build_row(build, repo(build.repo_id), true)) } }
+                    @if let Some(before) = data.more {
+                        div class="card-foot" { a class="button small" href=(dashboard_query(data.status, data.repo, Some(before))) { "Older builds" } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn onboarding() -> Markup {
+    empty(
+        Icon::Rocket,
+        "Add Kiln to a repository",
+        html! {
+            p { "Commit a " code { (FILE_NAME) } " to the default branch of a repository the Kiln GitHub App can see." }
+            pre { "version = 1\n\n[test.unit]\nimage = \"node:26\"\nsteps = [\"npm ci\", \"npm test\"]" }
+        },
+    )
+}
+
+pub struct RepoRow {
+    pub repo: Repo,
+    pub last: Option<Build>,
+    pub version: Option<String>,
+    pub recent: Vec<Build>,
+}
+
+pub fn repos(ctx: &Context<'_>, rows: &[RepoRow]) -> Markup {
+    layout(
+        "Repositories",
+        "repos",
+        ctx,
+        &[("page", "repos".into())],
+        html! {
+            div class="page-head" {
+                div class="titles" {
+                    h1 { "Repositories" }
+                    div class="lede" { "Repositories the Kiln GitHub App can see" }
+                }
+                div class="actions" {
+                    label class="search" {
+                        (icon(Icon::Search))
+                        span class="sr-only" { "Filter repositories" }
+                        input class="input" type="search" placeholder="Filter repositories" data-filter-rows autocomplete="off";
+                    }
+                    (refresh_button())
+                }
+            }
+            div id="live" { (repos_live(rows)) }
+        },
+    )
+}
+
+pub fn repos_live(rows: &[RepoRow]) -> Markup {
+    let (used, other): (Vec<&RepoRow>, Vec<&RepoRow>) =
+        rows.iter().filter(|r| r.repo.removed_at.is_none()).partition(|r| r.repo.enrolled);
+    let gone: Vec<&RepoRow> = rows.iter().filter(|r| r.repo.removed_at.is_some()).collect();
+    html! {
+        div class="stack" {
+            section class="card" {
+                div class="card-head" { h2 { "Using Kiln" span class="count" { (used.len()) } } }
+                @if used.is_empty() {
+                    (onboarding())
+                } @else {
+                    div class="table-wrap" {
+                        table class="table" {
+                            thead { tr { th { "Repository" } th { "Latest build" } th { "Recent" } th { "Released" } } }
+                            tbody {
+                                @for row in &used {
+                                    @let repo = &row.repo;
+                                    tr class="row-link" data-name=(repo.full_name()) {
+                                        td {
+                                            div class="cell" {
+                                                span class="repo-glyph" { (initial(&repo.name)) }
+                                                div class="stacked" {
+                                                    a class="cover" href=(repo_path(repo)) { strong { (repo.name) } }
+                                                    span { (repo.owner) }
+                                                }
+                                                @if repo.paused { span class="pill warn" { (icon(Icon::Pause)) "Paused" } }
+                                                @if repo.config_error.is_some() { span class="pill bad" { "Config error" } }
+                                                @if repo.drift.is_some() { span class="pill warn" { (icon(Icon::Alert)) "Registry" } }
+                                            }
+                                        }
+                                        td {
+                                            @match &row.last {
+                                                Some(build) => div class="cell" {
+                                                    (status(build.state, "sm"))
+                                                    div class="stacked" {
+                                                        strong { (commit_title(build)) }
+                                                        span { "#" (build.number) " · " (time(build.created_at)) }
+                                                    }
+                                                },
+                                                None => span class="muted" { "No builds yet" },
+                                            }
+                                        }
+                                        td { (recent_strip(repo, &row.recent)) }
+                                        td {
+                                            @match &row.version { Some(version) => span class="pill mono ok" { (version) }, None => span class="muted" { "–" } }
                                         }
                                     }
                                 }
@@ -378,79 +693,55 @@ pub fn dashboard_live(data: &DashboardData) -> Markup {
                     }
                 }
             }
-        }
-    }
-}
-
-fn onboarding(no_repos: bool) -> Markup {
-    html! {
-        div class="empty" {
-            @if no_repos {
-                h3 { "Add Kiln to a repository" }
-                p { "Commit a " code { (FILE_NAME) } " to the default branch of a repository the Kiln GitHub App can see. Kiln picks it up within a minute." }
-                pre { "version = 1\n\n[test.unit]\nimage = \"node:26\"\nsteps = [\"npm ci\", \"npm test\"]" }
-            } @else {
-                h3 { "No builds yet" }
-                p { "Builds appear here as soon as you push to a repository that uses Kiln." }
-            }
-        }
-    }
-}
-
-pub fn repos(ctx: &Context<'_>, latest: &[RepoSummary]) -> Markup {
-    layout(
-        "Repositories",
-        "repos",
-        ctx,
-        &[("page", "repos".into())],
-        html! {
-            div class="page-head" {
-                div {
-                    h1 { "Repositories" }
-                    div class="sub" { span { "Every repository the Kiln GitHub App can see. A repository uses Kiln once its default branch has a " code { (FILE_NAME) } "." } }
-                }
-                div class="actions" {
-                    form method="post" action="/system/refresh" { button class="button" type="submit" { (icon(Icon::Refresh)) "Check GitHub now" } }
-                }
-            }
-            div id="live" { (repos_live(latest)) }
-        },
-    )
-}
-
-pub fn repos_live(latest: &[RepoSummary]) -> Markup {
-    html! {
-        section class="card" {
-            @if latest.is_empty() {
-                div class="empty" {
-                    h3 { "No repositories yet" }
-                    p { "Install the Kiln GitHub App on your account and choose which repositories it may see." }
-                }
-            } @else {
-                table class="table" {
-                    thead { tr { th { "Repository" } th { "Status" } th { "Default branch" } th { "Released" } } }
-                    tbody {
-                        @for (repo, build, version) in latest {
-                            tr {
-                                td { a href=(repo_path(repo)) { strong { (repo.name) } } div class="hint" { (repo.owner) } }
-                                td {
-                                    @if repo.removed_at.is_some() { span class="pill" { "no longer visible" } }
-                                    @else if repo.paused { span class="pill warn" { "paused" } }
-                                    @else if repo.config_error.is_some() { span class="pill bad" { "config error" } }
-                                    @else if repo.enrolled { span class="pill ok" { "using Kiln" } }
-                                    @else { span class="pill" { "no " (FILE_NAME) } }
-                                }
-                                td {
-                                    @match build {
-                                        Some(build) => { span class={"pill " (kind(build.state))} { (state_label(build.state)) } " " (time(build.created_at)) },
-                                        None => span class="hint" { "never" },
+            @if !other.is_empty() {
+                section class="card" {
+                    div class="card-head" { h2 { "Without " code { (FILE_NAME) } span class="count" { (other.len()) } } }
+                    div class="table-wrap" {
+                        table class="table" {
+                            tbody {
+                                @for row in &other {
+                                    @let repo = &row.repo;
+                                    tr class="row-link dim" data-name=(repo.full_name()) {
+                                        td {
+                                            div class="cell" {
+                                                span class="repo-glyph" { (initial(&repo.name)) }
+                                                div class="stacked" { a class="cover" href=(repo_path(repo)) { strong { (repo.name) } } span { (repo.owner) } }
+                                            }
+                                        }
+                                        td class="when right" { span class="pill" { (icon(Icon::Branch)) (repo.default_branch) } }
                                     }
                                 }
-                                td { @match version { Some(version) => code { (version) }, None => span class="hint" { "–" } } }
                             }
                         }
                     }
                 }
+            }
+            @if !gone.is_empty() {
+                section class="card" {
+                    div class="card-head" { h2 { "No longer visible" span class="count" { (gone.len()) } } }
+                    div class="table-wrap" {
+                        table class="table" {
+                            tbody {
+                                @for row in &gone {
+                                    tr class="row-link dim" data-name=(row.repo.full_name()) {
+                                        td { div class="cell" { span class="repo-glyph" { (initial(&row.repo.name)) } div class="stacked" { a class="cover" href=(repo_path(&row.repo)) { strong { (row.repo.name) } } span { (row.repo.owner) } } } }
+                                        td class="when right" { @if let Some(at) = row.repo.removed_at { "Removed " (time(at)) } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn recent_strip(repo: &Repo, builds: &[Build]) -> Markup {
+    html! {
+        span class="recent" {
+            @for build in builds {
+                a class=(kind(build.state)) href=(build_path(repo, build)) title={"#" (build.number) " · " (state_label(build.state))} aria-label={"Build " (build.number) " " (state_label(build.state))} {}
             }
         }
     }
@@ -497,6 +788,7 @@ pub struct RepoData {
     pub show: Show,
     pub repo: Repo,
     pub builds: Vec<Build>,
+    pub history: Vec<Build>,
     pub releases: Vec<(String, i64, i64)>,
     pub config: Option<Config>,
     pub more: Option<i64>,
@@ -510,56 +802,84 @@ pub fn repo(ctx: &Context<'_>, data: &RepoData) -> Markup {
         "repos",
         ctx,
         &[("page", "repo".into()), ("repo", repo.id.to_string())],
-        html! {
-            div id="live" { (repo_live(ctx, data)) }
-        },
+        html! { div id="live" { (repo_live(ctx, data)) } },
     )
+}
+
+fn rate(builds: &[Build]) -> Option<(usize, usize)> {
+    let judged: Vec<&Build> = builds
+        .iter()
+        .filter(|b| matches!(b.state, BuildState::Succeeded | BuildState::Failed | BuildState::Errored))
+        .collect();
+    (!judged.is_empty()).then(|| (judged.iter().filter(|b| b.state == BuildState::Succeeded).count(), judged.len()))
+}
+
+pub fn median(builds: &[Build]) -> Option<i64> {
+    let mut times: Vec<i64> = builds
+        .iter()
+        .filter(|b| b.state == BuildState::Succeeded)
+        .filter_map(|b| Some(b.finished_at? - b.started_at?))
+        .collect();
+    times.sort_unstable();
+    times.get(times.len() / 2).copied()
 }
 
 pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
     let repo = &data.repo;
     let github = format!("{}/{}", ctx.github_web, repo.full_name());
+    let last = data.history.last();
     html! {
-        div class="crumbs" { a href="/repos" { "Repositories" } " / " (repo.owner) }
+        nav class="crumbs" aria-label="Breadcrumb" { a href="/repos" { "Repositories" } span class="sep" { "/" } span { (repo.owner) } }
         div class="page-head" {
-            div {
-                h1 { (repo.name) }
-                div class="sub" {
-                    span class="pill" { (icon(Icon::Branch)) (repo.default_branch) }
-                    @if let Some(head) = &repo.head_sha { code { (&head[..head.len().min(7)]) } }
-                    a href=(github) target="_blank" rel="noopener" { "GitHub " (icon(Icon::External)) }
+            div class="titles" {
+                div class="title-row" {
+                    span class="repo-glyph" { (initial(&repo.name)) }
+                    div {
+                        h1 { (repo.name) }
+                        div class="chips" {
+                            span class="pill" { (icon(Icon::Branch)) (repo.default_branch) }
+                            @if let Some(head) = &repo.head_sha { a class="mono" href={(github) "/commit/" (head)} target="_blank" rel="noopener" { (icon(Icon::Commit)) (&head[..head.len().min(7)]) } }
+                            a href=(github) target="_blank" rel="noopener" { (PreEscaped(GITHUB)) "GitHub" (icon(Icon::External)) }
+                        }
+                    }
                 }
             }
             div class="actions" {
-                @if repo.enrolled && !repo.paused {
+                @if repo.enrolled && !repo.paused && repo.removed_at.is_none() {
                     form method="post" action={(repo_path(repo)) "/build"} {
                         button class="button primary" type="submit" { (icon(Icon::Play)) "Build " (repo.default_branch) }
                     }
                 }
                 @if repo.paused {
                     form method="post" action={(repo_path(repo)) "/resume"} { button class="button" type="submit" { (icon(Icon::Play)) "Resume" } }
-                } @else if repo.enrolled {
-                    form method="post" action={(repo_path(repo)) "/pause"} data-confirm="Pause Kiln for this repository? Pushes are ignored until you resume." {
-                        button class="button" type="submit" { (icon(Icon::Pause)) "Pause" }
-                    }
                 }
                 @if repo.enrolled {
-                    form method="post" action={(repo_path(repo)) "/reset-cache"} data-confirm="Delete the build cache for this repository? The next build starts cold." {
-                        button class="button danger" type="submit" disabled[data.busy] title=(if data.busy { "Wait until the running build finishes" } else { "" }) { (icon(Icon::Trash)) "Reset cache" }
+                    details class="menu" {
+                        summary class="button icon-only" aria-label="More actions" title="More actions" { (icon(Icon::More)) }
+                        div class="menu-panel" {
+                            @if !repo.paused {
+                                form method="post" action={(repo_path(repo)) "/pause"} data-confirm="Kiln ignores new pushes, tags and pull requests until you resume." data-confirm-title={"Pause " (repo.name) "?"} data-confirm-action="Pause" {
+                                    button class="menu-item" type="submit" { (icon(Icon::Pause)) "Pause builds" }
+                                }
+                            }
+                            form method="post" action={(repo_path(repo)) "/reset-cache"} data-confirm="The next build starts without cached dependencies or layers." data-confirm-title="Reset the build cache?" data-confirm-action="Reset cache" data-confirm-danger {
+                                button class="menu-item danger" type="submit" disabled[data.busy] title=(if data.busy { "Wait until the running build finishes" } else { "" }) { (icon(Icon::Trash)) "Reset build cache" }
+                            }
+                        }
                     }
                 }
             }
         }
         @if repo.paused {
-            div class="banner warn" { (icon(Icon::Pause)) div class="text" { strong { "Paused" } "Kiln ignores new pushes, tags and pull requests here until you resume." } }
+            div class="banner warn" { (icon(Icon::Pause)) div class="text" { strong { "Builds are paused" } span class="hint" { "New pushes, tags and pull requests are ignored." } } }
         }
         @if let Some(drift) = &repo.drift {
             div class="banner warn" {
                 (icon(Icon::Alert))
                 div class="text" {
                     strong { "Published outside Kiln" }
-                    "These versions appeared in the registry without a Kiln release: " code { (drift) } ". If another CI still publishes this repository, remove it; otherwise check who holds the registry credential."
-                    form method="post" action={(repo_path(repo)) "/dismiss-drift"} style="margin-top:8px" { button class="button" type="submit" { "Dismiss" } }
+                    span class="hint" { "These versions appeared in the registry without a Kiln release: " code { (drift) } }
+                    form method="post" action={(repo_path(repo)) "/dismiss-drift"} { button class="button small" type="submit" { "Dismiss" } }
                 }
             }
         }
@@ -567,52 +887,126 @@ pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
             div class="banner bad" { (icon(Icon::Alert)) div class="text" { strong { (FILE_NAME) " on " (repo.default_branch) " has errors" } pre { (error) } } }
         }
         @if !repo.enrolled && repo.removed_at.is_none() {
-            div class="banner wait" { (icon(Icon::Clock)) div class="text" { strong { "Not using Kiln yet" } "Commit a " code { (FILE_NAME) } " to " (repo.default_branch) " to start building this repository." } }
+            div class="banner wait" { (icon(Icon::Clock)) div class="text" { strong { "Not using Kiln yet" } span class="hint" { "Commit a " code { (FILE_NAME) } " to " (repo.default_branch) " to start building." } } }
         }
-        div class="grid" {
-            section class="card" {
-                div class="tabs" {
-                    @for (show, label) in [(Show::All, "All builds"), (Show::Branch, (repo.default_branch.as_str())), (Show::Pulls, "Pull requests"), (Show::Tags, "Tags")] {
-                        a class=(if show == data.show { "tab active" } else { "tab" }) href={(repo_path(repo)) (show.query())} { (label) }
+        @if repo.enrolled || !data.history.is_empty() {
+            div class="tiles" {
+                @match data.releases.first() {
+                    Some((version, number, at)) => a class="card tile" href={(repo_path(repo)) "/builds/" (number)} {
+                        span class="label" { (icon(Icon::Tag)) "Latest release" }
+                        span class="value mono" { (version) }
+                        span class="foot" { (time(*at)) " · #" (number) }
+                    },
+                    None => div class="card tile" {
+                        span class="label" { (icon(Icon::Tag)) "Latest release" }
+                        span class="value" { "–" }
+                        span class="foot" { "Nothing released yet" }
+                    },
+                }
+                div class="card tile" {
+                    span class="label" { (icon(Icon::Check)) "Success rate" }
+                    @match rate(&data.history) {
+                        Some((passed, total)) => { span class="value" { (passed * 100 / total) "%" } span class="foot" { "Last " (total) " finished builds" } },
+                        None => { span class="value" { "–" } span class="foot" { "No finished builds" } },
                     }
                 }
-                @if data.builds.is_empty() {
-                    div class="empty" { p { (match data.show { Show::All => "No builds yet.", Show::Branch => "No builds of the default branch yet.", Show::Pulls => "No pull request builds yet.", Show::Tags => "No tag builds yet." }) } }
-                } @else {
-                    ul class="list" { @for build in &data.builds { (build_row(build, Some(repo), false)) } }
-                    @if let Some(before) = data.more {
-                        @let separator = if data.show == Show::All { "?" } else { "&" };
-                        a class="more" href={(repo_path(repo)) (data.show.query()) (separator) "before=" (before)} { "Older builds" }
+                div class="card tile" {
+                    span class="label" { (icon(Icon::Timer)) "Median duration" }
+                    @match median(&data.history) {
+                        Some(seconds) => { span class="value" { (duration(seconds)) } span class="foot" { "Of passing builds" } },
+                        None => { span class="value" { "–" } span class="foot" { "No passing builds" } },
+                    }
+                }
+                @match last {
+                    Some(build) => a class="card tile" href=(build_path(repo, build)) {
+                        span class="label" { (icon(Icon::Activity)) "Latest build" }
+                        span class={"value " (kind(build.state))} { (state_label(build.state)) }
+                        span class="foot" { "#" (build.number) " · " (time(build.created_at)) }
+                    },
+                    None => div class="card tile" {
+                        span class="label" { (icon(Icon::Activity)) "Latest build" }
+                        span class="value" { "–" }
+                        span class="foot" { "No builds yet" }
+                    },
+                }
+            }
+        }
+        div class="columns" {
+            div class="stack" {
+                @if data.history.len() > 1 {
+                    section class="card" {
+                        div class="card-head" { h2 { "Build durations" span class="count" { "last " (data.history.len()) } } }
+                        (history_chart(repo, &data.history))
+                    }
+                }
+                section class="card" {
+                    div class="card-head" {
+                        nav class="segmented" aria-label="Filter builds" {
+                            @for (show, label) in [(Show::All, "All"), (Show::Branch, repo.default_branch.as_str()), (Show::Pulls, "Pull requests"), (Show::Tags, "Tags")] {
+                                a class=(if show == data.show { "active" } else { "" }) href={(repo_path(repo)) (show.query())} { (label) }
+                            }
+                        }
+                    }
+                    @if data.builds.is_empty() {
+                        (empty(Icon::Activity, match data.show { Show::All => "No builds yet", Show::Branch => "No branch builds yet", Show::Pulls => "No pull request builds yet", Show::Tags => "No tag builds yet" }, html! {}))
+                    } @else {
+                        ul class="builds" { @for build in &data.builds { (build_row(build, Some(repo), false)) } }
+                        @if let Some(before) = data.more {
+                            @let separator = if data.show == Show::All { "?" } else { "&" };
+                            div class="card-foot" { a class="button small" href={(repo_path(repo)) (data.show.query()) (separator) "before=" (before)} { "Older builds" } }
+                        }
                     }
                 }
             }
             aside class="stack" {
                 section class="card" {
-                    h2 { "Releases" }
+                    div class="card-head" { h2 { "Releases" } }
                     @if data.releases.is_empty() {
-                        div class="empty" { p { "Nothing released yet." } }
+                        div class="empty compact" { p { "Nothing released yet" } }
                     } @else {
-                        @for (version, number, at) in &data.releases {
-                            div class="release" {
-                                span class="pill ok" { (version) }
-                                a href={(repo_path(repo)) "/builds/" (number)} { "#" (number) }
-                                span class="hint" { (time(*at)) }
+                        ul class="releases" {
+                            @for (version, number, at) in &data.releases {
+                                li {
+                                    span class="pill mono ok" { (icon(Icon::Tag)) (version) }
+                                    a class="grow cover" href={(repo_path(repo)) "/builds/" (number)} { "#" (number) }
+                                    span class="when" { (time(*at)) }
+                                }
                             }
                         }
                     }
                 }
                 @if let Some(config) = &data.config {
                     section class="card" {
-                        h2 { "Configuration" }
+                        div class="card-head" { h2 { "Pipeline" } span class="pill mono" { (FILE_NAME) } }
                         dl class="facts" {
-                            dt { "Images" } dd { @for (i, image) in config.images.iter().enumerate() { @if i > 0 { ", " } code { (image.name) } } }
-                            dt { "Releases" } dd { (match config.release.mode { ReleaseMode::Rc => "every push to the default branch, and tags", ReleaseMode::Tags => "tags only" }) @if config.release.shadow { " · shadow mode" } }
-                            dt { "Tests" } dd { @if config.test.is_empty() { "none" } @else { (config.test.keys().cloned().collect::<Vec<_>>().join(", ")) } }
-                            dt { "Verify" } dd { @if config.verify.is_empty() { "none" } @else { (config.verify.keys().cloned().collect::<Vec<_>>().join(", ")) } }
                             dt { "Runs on" } dd { (triggers(&config.on)) }
+                            dt { "Tests" } dd { @if config.test.is_empty() { span class="muted" { "none" } } @for name in config.test.keys() { span class="pill" { (name) } } }
+                            dt { "Images" } dd { @for image in &config.images { span class="pill" { (icon(Icon::Box)) (image.name) } } }
+                            dt { "Verify" } dd { @if config.verify.is_empty() { span class="muted" { "none" } } @for name in config.verify.keys() { span class="pill" { (name) } } }
+                            dt { "Releases" } dd {
+                                (match config.release.mode { ReleaseMode::Rc => "Every default-branch push and tag", ReleaseMode::Tags => "Tags only" })
+                                @if config.release.shadow { span class="pill warn" { "Shadow" } }
+                            }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+fn history_chart(repo: &Repo, builds: &[Build]) -> Markup {
+    let seconds = |b: &Build| match (b.started_at, b.finished_at) {
+        (Some(start), Some(end)) => end - start,
+        _ => 0,
+    };
+    let max = builds.iter().map(seconds).max().unwrap_or(0).max(1);
+    html! {
+        div class="history" role="img" aria-label="Duration of recent builds" {
+            @for build in builds {
+                @let height = (seconds(build) * 100 / max).max(8);
+                a class=(kind(build.state)) href=(build_path(repo, build)) style={"height:" (height) "%"}
+                    title={"#" (build.number) " · " (state_label(build.state)) @if seconds(build) > 0 { " · " (duration(seconds(build))) }} {}
             }
         }
     }
@@ -657,16 +1051,12 @@ pub fn build(ctx: &Context<'_>, data: &BuildData) -> Markup {
         html! {
             div id="live" { (build_head(ctx, data)) }
             div class="build-layout" {
-                aside id="tasks" class="tasks" { (tasks_card(data, selected)) }
+                div id="tasks" class="side-col" { (sidebar(ctx, data, selected)) }
                 div class="stack" {
                     div id="log" {
-                        @if data.tasks.is_empty() {
-                            div class="log" { div class="log-empty" { (no_tasks_message(&data.build)) } }
-                        } @else {
-                            div class="log" { div class="log-empty" { "Loading log…" } }
-                        }
+                        div class="log" { div class="log-empty" { @if data.tasks.is_empty() { (no_tasks_message(&data.build)) } @else { "Loading log…" } } }
                     }
-                    @if !data.images.is_empty() { div id="images" { (images_card(&data.images)) } }
+                    div id="images" { @if data.images.iter().any(|i| i.digest.is_some()) { (images_card(&data.images)) } }
                 }
             }
         },
@@ -677,7 +1067,7 @@ fn no_tasks_message(build: &Build) -> &'static str {
     match build.state {
         BuildState::Queued => "This build is waiting for a free build slot.",
         BuildState::Skipped => "This build was skipped.",
-        BuildState::Failed if build.failure == Some(kiln_store::Failure::Config) => {
+        BuildState::Failed if build.failure == Some(Failure::Config) => {
             "Kiln could not read the configuration, so nothing ran."
         }
         _ if build.trigger == Trigger::Tag => "This release reused an image that was already built and verified.",
@@ -700,43 +1090,151 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
     let path = build_path(repo, build);
     let released_tag = build.trigger == Trigger::Tag && build.state == BuildState::Succeeded;
     html! {
-        div class="crumbs" { a href=(repo_path(repo)) { (repo.full_name()) } " / #" (build.number) }
+        span hidden data-build-state=(kind(build.state)) data-build-label=(state_label(build.state)) {}
+        nav class="crumbs" aria-label="Breadcrumb" {
+            a href="/repos" { "Repositories" }
+            span class="sep" { "/" }
+            a href=(repo_path(repo)) { (repo.name) }
+            span class="sep" { "/" }
+            span { "Build #" (build.number) }
+        }
         div class="page-head" {
-            div {
-                h1 { (commit_title(build)) }
-                div class="sub" {
-                    span class={"pill " (kind(build.state))} { (state_label(build.state)) }
-                    a class="plain" href=(trigger_url(ctx, repo, build)) target="_blank" rel="noopener" { (trigger_pill(build)) }
-                    a href=(commit_url) target="_blank" rel="noopener" { code { (build.short_sha()) } }
-                    @if let Some(version) = &build.version { span class="pill" { (icon(Icon::Tag)) (version) } }
-                    @if let Some(actor) = &build.actor { span { "started by " (actor) } }
-                    span { (time(build.created_at)) }
-                    (build_duration(build))
-                    @if let Some(started) = build.started_at.filter(|s| s - build.created_at >= 10) {
-                        span { "waited " (duration(started - build.created_at)) " for a slot" }
+            div class="titles" {
+                div class="title-row" {
+                    (status(build.state, "lg"))
+                    div {
+                        h1 { (commit_title(build)) }
+                        div class="chips" {
+                            a href=(trigger_url(ctx, repo, build)) target="_blank" rel="noopener" { (trigger_pill(build)) }
+                            a class="mono" href=(commit_url) target="_blank" rel="noopener" title="Open the commit on GitHub" { (icon(Icon::Commit)) (build.short_sha()) }
+                            (version_pill(build))
+                            @if let Some(actor) = &build.actor { span { (icon(Icon::User)) (actor) } }
+                            span { (icon(Icon::Clock)) (time(build.created_at)) }
+                            @if build.started_at.is_some() { span { (icon(Icon::Timer)) (elapsed(build.started_at, build.finished_at)) } }
+                        }
                     }
-                    @if let Some(original) = &data.rerun_of { span { "rerun of " a href=(build_path(repo, original)) { "#" (original.number) } } }
                 }
             }
             div class="actions" {
-                @if build.state == BuildState::Queued || build.state == BuildState::Starting || build.state == BuildState::Running {
-                    form method="post" action={(path) "/cancel"} data-confirm="Cancel this build?" {
+                @if matches!(build.state, BuildState::Queued | BuildState::Starting | BuildState::Running) {
+                    form method="post" action={(path) "/cancel"} data-confirm="Running tasks are stopped and nothing is released." data-confirm-title={"Cancel build #" (build.number) "?"} data-confirm-action="Cancel build" data-confirm-danger {
                         button class="button danger" type="submit" { (icon(Icon::Stop)) "Cancel" }
                     }
                 }
                 @if build.state.is_finished() && !released_tag {
                     form method="post" action={(path) "/rerun"} {
-                        button class="button" type="submit" { (icon(Icon::Rerun)) "Rerun" }
+                        button class=(if kind(build.state) == "bad" { "button primary" } else { "button" }) type="submit" { (icon(Icon::Rerun)) "Rerun" }
                     }
                 }
             }
         }
+        (pipeline(data))
         (banner(build, data.ahead))
-        @if build.attempt > 1 {
-            div class="sub hint" style="margin:-8px 0 16px" {
-                "Attempt " (data.attempt) " of " (build.attempt) " · "
-                @for attempt in 1..=build.attempt {
-                    @if attempt == data.attempt { strong { (attempt) } } @else { a href={(path) "?attempt=" (attempt)} { (attempt) } } " "
+    }
+}
+
+struct Stage {
+    name: &'static str,
+    class: &'static str,
+    state: TaskState,
+    info: Markup,
+    first: Option<i64>,
+}
+
+fn stages(data: &BuildData) -> Vec<Stage> {
+    let build = &data.build;
+    let mut out = Vec::new();
+    for (name, kinds) in [
+        ("Source", &[TaskKind::Fetch][..]),
+        ("Test", &[TaskKind::Test][..]),
+        ("Build", &[TaskKind::Image, TaskKind::Push][..]),
+        ("Verify", &[TaskKind::Verify][..]),
+    ] {
+        let tasks: Vec<&Task> = data.tasks.iter().filter(|t| kinds.contains(&t.kind)).collect();
+        if tasks.is_empty() {
+            continue;
+        }
+        let any = |s: &[TaskState]| tasks.iter().any(|t| s.contains(&t.state));
+        let all = |s: &[TaskState]| tasks.iter().all(|t| s.contains(&t.state));
+        let state = if any(&[TaskState::Failed, TaskState::TimedOut]) {
+            TaskState::Failed
+        } else if any(&[TaskState::Running]) || (any(&[TaskState::Passed]) && any(&[TaskState::Pending])) {
+            TaskState::Running
+        } else if all(&[TaskState::Passed]) {
+            TaskState::Passed
+        } else if all(&[TaskState::Skipped, TaskState::Cancelled, TaskState::Passed]) && !all(&[TaskState::Passed]) {
+            if any(&[TaskState::Cancelled]) { TaskState::Cancelled } else { TaskState::Skipped }
+        } else {
+            TaskState::Pending
+        };
+        let start = tasks.iter().filter_map(|t| t.started_at).min();
+        let end = tasks.iter().filter_map(|t| t.finished_at).max();
+        let count = match name {
+            "Test" | "Verify" => Some(format!("{} {}", tasks.len(), if tasks.len() == 1 { "job" } else { "jobs" })),
+            "Build" => {
+                let images = tasks.iter().filter(|t| t.kind == TaskKind::Image).count();
+                Some(format!("{images} {}", if images == 1 { "image" } else { "images" }))
+            }
+            _ => None,
+        };
+        let info = html! {
+            @if let Some(count) = &count { (count) }
+            @if count.is_some() { " · " }
+            @match state {
+                TaskState::Running => (elapsed(start, None)),
+                TaskState::Pending | TaskState::Skipped | TaskState::Cancelled if start.is_none() => (task_label(state)),
+                _ => (elapsed(start, end)),
+            }
+        };
+        let first = tasks
+            .iter()
+            .find(|t| matches!(t.state, TaskState::Failed | TaskState::TimedOut | TaskState::Running))
+            .or(tasks.first())
+            .map(|t| t.ordinal);
+        out.push(Stage { name, class: task_kind(state).0, state, info, first });
+    }
+    if build.trigger != Trigger::PullRequest && (build.version.is_some() || !data.tasks.is_empty()) {
+        let version = build.version.clone().unwrap_or_default();
+        let (state, info) = if released(build) {
+            (TaskState::Passed, html! { (version) })
+        } else if build.state == BuildState::Releasing {
+            (TaskState::Running, html! { "Publishing " (version) })
+        } else if build.failure == Some(Failure::Release) || build.failure == Some(Failure::Version) {
+            (TaskState::Failed, html! { "Failed" })
+        } else if build.state == BuildState::Succeeded {
+            (
+                TaskState::Skipped,
+                html! { @if build.detail.as_deref().is_some_and(|d| d.starts_with("Shadow")) { "Shadow run" } @else { "Candidate only" } },
+            )
+        } else if build.state.is_finished() {
+            (TaskState::Skipped, html! { "Skipped" })
+        } else {
+            (TaskState::Pending, html! { "Waiting" })
+        };
+        out.push(Stage { name: "Release", class: task_kind(state).0, state, info, first: None });
+    }
+    out
+}
+
+fn pipeline(data: &BuildData) -> Markup {
+    let stages = stages(data);
+    if stages.len() < 2 {
+        return html! {};
+    }
+    html! {
+        div class="pipeline" role="list" aria-label="Pipeline" {
+            @for (index, stage) in stages.iter().enumerate() {
+                @if index > 0 { span class={"connector" @if stages[index - 1].state == TaskState::Passed { " done" }} {} }
+                @let class = if matches!(stage.state, TaskState::Skipped | TaskState::Cancelled) { "skip" } else { stage.class };
+                @match stage.first {
+                    Some(task) => a class={"stage " (class)} role="listitem" href={"#task-" (task)} data-task=(task) data-attempt=(data.attempt) {
+                        (task_status(stage.state, "sm"))
+                        span class="what" { span class="name" { (stage.name) } span class="info" { (stage.info) } }
+                    },
+                    None => div class={"stage " (class)} role="listitem" {
+                        (task_status(stage.state, "sm"))
+                        span class="what" { span class="name" { (stage.name) } span class="info" { (stage.info) } }
+                    },
                 }
             }
         }
@@ -747,69 +1245,96 @@ fn trigger_url(ctx: &Context<'_>, repo: &Repo, build: &Build) -> String {
     let base = format!("{}/{}", ctx.github_web, repo.full_name());
     match build.trigger {
         Trigger::PullRequest => format!("{base}/pull/{}", build.pr_number.unwrap_or_default()),
-        Trigger::Tag => format!("{base}/tree/{}", build.ref_name),
-        Trigger::Push | Trigger::Manual => format!("{base}/tree/{}", build.ref_name),
+        Trigger::Tag | Trigger::Push | Trigger::Manual => format!("{base}/tree/{}", build.ref_name),
     }
 }
 
 fn banner(build: &Build, ahead: Option<usize>) -> Markup {
-    let class = kind(build.state);
     let detail = build.detail.clone().unwrap_or_default();
-    let config = build.failure == Some(kiln_store::Failure::Config);
+    let config = build.failure == Some(Failure::Config);
     let title = headline(build);
-    let show_detail = !detail.is_empty() && !title.contains(detail.lines().next().unwrap_or_default()) || config;
+    let show_detail = (!detail.is_empty() && !title.contains(detail.lines().next().unwrap_or_default())) || config;
+    let quiet = matches!(build.state, BuildState::Running | BuildState::Starting) && !show_detail;
+    if quiet || (build.state == BuildState::Succeeded && !show_detail && title == "Passed") {
+        return html! {};
+    }
+    let glyph = match build.state {
+        BuildState::Succeeded if released(build) => Icon::Rocket,
+        BuildState::Queued => Icon::Clock,
+        BuildState::Failed | BuildState::Errored => Icon::Alert,
+        state => state_icon(state),
+    };
     html! {
-        div class={"banner " (class)} {
-            (icon(state_icon(build.state)))
+        div class={"banner " (kind(build.state))} role=[matches!(build.state, BuildState::Failed | BuildState::Errored).then_some("alert")] {
+            (icon(glyph))
             div class="text" {
                 strong { (title) }
                 @if show_detail {
-                    @if config || detail.contains('\n') { pre { (detail) } } @else { (detail) }
+                    @if config || detail.contains('\n') { pre { (detail) } } @else { span class="hint" { (detail) } }
                 }
                 @if build.state.is_active() && build.state != BuildState::Releasing && title != phase_label(build.phase) { span class="hint" { (phase_label(build.phase)) } }
                 @if let Some(ahead) = ahead {
-                    span class="hint" { (match ahead { 0 => "It starts as soon as a slot is free.".to_owned(), 1 => "1 build is ahead of it.".to_owned(), n => format!("{n} builds are ahead of it.") }) }
+                    span class="hint" { (match ahead { 0 => "Starts as soon as a build slot is free.".to_owned(), 1 => "1 build is ahead of it.".to_owned(), n => format!("{n} builds are ahead of it.") }) }
                 }
             }
         }
     }
 }
 
-pub fn tasks_card(data: &BuildData, selected: Option<i64>) -> Markup {
+pub fn sidebar(ctx: &Context<'_>, data: &BuildData, selected: Option<i64>) -> Markup {
+    let BuildData { repo, build, .. } = data;
     html! {
-        section class="card" {
-            @if data.tasks.is_empty() {
-                div class="empty" { p { "No tasks." } }
-            }
-            @for (index, task) in data.tasks.iter().enumerate() {
-                @let phase = phase_group(task.kind);
-                @if index == 0 || phase_group(data.tasks[index - 1].kind) != phase {
-                    div class="phase-label" { (phase) }
+        @if !data.tasks.is_empty() || !data.images.is_empty() {
+            section class="card tasks" aria-label="Tasks" {
+                @for (index, task) in data.tasks.iter().enumerate() {
+                    @let group = phase_group(task.kind);
+                    @if index == 0 || phase_group(data.tasks[index - 1].kind) != group {
+                        div class="group-label" { (group) }
+                    }
+                    a class={"task" @if Some(task.ordinal) == selected { " selected" }} href={"#task-" (task.ordinal)}
+                        data-task=(task.ordinal) data-attempt=(data.attempt) data-state=(task.state.as_str()) data-default[Some(task.ordinal) == selected] {
+                        (task_status(task.state, "sm"))
+                        span class="name" { (task_title(task)) }
+                        span class="time" { (elapsed(task.started_at, task.finished_at)) }
+                    }
                 }
-                @let (class, glyph) = task_kind(task.state);
-                a class={"task" @if Some(task.ordinal) == selected { " selected" }} href={"#task-" (task.ordinal)}
-                    data-task=(task.ordinal) data-attempt=(data.attempt) data-state=(task.state.as_str()) data-default[Some(task.ordinal) == selected] {
-                    span class={"state " (class)} { (icon(glyph)) }
-                    span class="name" { (task_title(task)) }
-                    span class="time" {
-                        @match (task.started_at, task.finished_at) {
-                            (Some(start), Some(end)) => (duration(end - start)),
-                            (Some(start), None) => span data-started=(start) { "" },
-                            _ => "",
+                @if data.images.iter().any(|i| i.released.is_some()) || build.state == BuildState::Releasing {
+                    div class="group-label" { "Release" }
+                    @for image in &data.images {
+                        div class="task static" {
+                            (task_status(if image.released.is_some() { TaskState::Passed } else { TaskState::Running }, "sm"))
+                            span class="name" { (image.name) }
+                            span class="time mono" { @if let Some(tag) = &image.released { (tag) } }
                         }
                     }
                 }
             }
-            @if data.images.iter().any(|i| i.released.is_some()) || data.build.state == BuildState::Releasing {
-                div class="phase-label" { "Release" }
-                @for image in &data.images {
-                    @let done = image.released.is_some();
-                    div class="task" {
-                        span class={"state " (if done { "ok" } else { "run" })} { (icon(if done { Icon::Check } else { Icon::Spinner })) }
-                        span class="name" { (image.name) }
-                        span class="time" { @if let Some(tag) = &image.released { (tag) } }
+        }
+        section class="card" {
+            div class="card-head" { h2 { "Details" } }
+            dl class="facts" {
+                dt { "Status" } dd { span class={"pill " (kind(build.state))} { (state_label(build.state)) } }
+                dt { "Repository" } dd { a href=(repo_path(repo)) { (repo.full_name()) } }
+                dt { "Trigger" } dd {
+                    (match build.trigger { Trigger::Push => "Push", Trigger::Tag => "Tag", Trigger::PullRequest => "Pull request", Trigger::Manual => "Manual" })
+                    a href=(trigger_url(ctx, repo, build)) target="_blank" rel="noopener" { @if build.trigger == Trigger::PullRequest { "#" (build.pr_number.unwrap_or_default()) } @else { (build.ref_name) } }
+                }
+                dt { "Commit" } dd { a class="mono" href={(ctx.github_web) "/" (repo.full_name()) "/commit/" (build.sha)} target="_blank" rel="noopener" { (build.short_sha()) } }
+                @if let Some(version) = &build.version { dt { "Version" } dd { code { (version) } } }
+                @if let Some(actor) = &build.actor { dt { "Started by" } dd { (actor) } }
+                dt { "Created" } dd { (time(build.created_at)) }
+                @if let Some(started) = build.started_at { dt { "Waited" } dd { (duration(started - build.created_at)) } }
+                @if build.started_at.is_some() { dt { "Duration" } dd { (elapsed(build.started_at, build.finished_at)) } }
+                @if build.attempt > 1 {
+                    dt { "Attempt" } dd {
+                        div class="attempts" {
+                            @for attempt in 1..=build.attempt {
+                                @if attempt == data.attempt { span class="current" aria-current="true" { (attempt) } } @else { a href={(build_path(repo, build)) "?attempt=" (attempt)} { (attempt) } }
+                            }
+                        }
                     }
                 }
+                @if let Some(original) = &data.rerun_of { dt { "Rerun of" } dd { a href=(build_path(repo, original)) { "#" (original.number) } } }
             }
         }
     }
@@ -827,15 +1352,25 @@ fn phase_group(kind: TaskKind) -> &'static str {
 pub fn images_card(images: &[ImageRecord]) -> Markup {
     html! {
         section class="card" {
-            h2 { "Images" }
-            table class="table" {
-                thead { tr { th { "Image" } th { "Digest" } th { "Released as" } } }
-                tbody {
-                    @for image in images {
-                        tr {
-                            td { strong { (image.name) } }
-                            td { @match &image.digest { Some(digest) => code title=(digest) { (&digest[..digest.len().min(19)]) "…" }, None => span class="hint" { "not built" } } }
-                            td { @match &image.released { Some(tag) => span class="pill ok" { (tag) }, None => span class="hint" { "–" } } }
+            div class="card-head" { h2 { "Images" span class="count" { (images.len()) } } }
+            div class="table-wrap" {
+                table class="table" {
+                    thead { tr { th { "Image" } th { "Digest" } th { "Released as" } } }
+                    tbody {
+                        @for image in images {
+                            tr {
+                                td { div class="cell" { span class="muted" { (icon(Icon::Box)) } strong { (image.name) } } }
+                                td {
+                                    @match &image.digest {
+                                        Some(digest) => span class="digest" {
+                                            code title=(digest) { (&digest[..digest.len().min(19)]) }
+                                            button class="copy" type="button" data-copy=(digest) title="Copy digest" aria-label="Copy digest" { (icon(Icon::Copy)) }
+                                        },
+                                        None => span class="muted" { "Not built" },
+                                    }
+                                }
+                                td { @match &image.released { Some(tag) => span class="pill mono ok" { (icon(Icon::Tag)) (tag) }, None => span class="muted" { "–" } } }
+                            }
                         }
                     }
                 }
@@ -846,19 +1381,30 @@ pub fn images_card(images: &[ImageRecord]) -> Markup {
 
 pub fn log_view(build: &Build, attempt: i64, task: &Task, text: &str) -> Markup {
     let raw = format!("/builds/{}/logs/{attempt}/{}.txt", build.id, task.ordinal);
-    let (class, _) = task_kind(task.state);
     html! {
         div class="log" {
             div class="log-head" data-bytes=(text.len()) data-state=(task.state.as_str()) {
-                span class={"pill " (class)} { (match task.state { TaskState::Passed => "passed", TaskState::Failed => "failed", TaskState::TimedOut => "timed out", TaskState::Running => "running", TaskState::Cancelled => "cancelled", TaskState::Skipped => "skipped", TaskState::Pending => "waiting" }) }
-                span class="name" { (task_title(task)) }
-                @if let Some(code) = task.exit_code.filter(|c| *c != 0) { span { "exit " (code) } }
-                @if task.state == TaskState::Running { button type="button" data-follow { "Follow" } }
-                a href=(raw) download { "Raw log" }
+                div class="name" { (task_status(task.state, "sm")) span { (task_title(task)) } }
+                span class="meta" {
+                    (elapsed(task.started_at, task.finished_at))
+                    @if let Some(code) = task.exit_code.filter(|c| *c != 0) { " · exit " (code) }
+                }
+                div class="log-tools" {
+                    label class="log-find" {
+                        (icon(Icon::Search))
+                        span class="sr-only" { "Find in log" }
+                        input type="search" placeholder="Find in log" data-find autocomplete="off" spellcheck="false";
+                        span class="hits" data-hits {}
+                    }
+                    button class="log-tool" type="button" data-wrap title="Wrap long lines" aria-pressed="true" { (icon(Icon::Wrap)) }
+                    button class="log-tool" type="button" data-expand title="Expand all steps" { (icon(Icon::Expand)) }
+                    @if task.state == TaskState::Running { button class="log-tool" type="button" data-follow title="Keep the newest output in view" { (icon(Icon::ArrowDown)) "Follow" } }
+                    a class="log-tool" href=(raw) download title="Download the raw log" { (icon(Icon::Download)) }
+                }
             }
-            div class="log-body" {
+            div class="log-body" data-task=(task.ordinal) {
                 @if text.trim().is_empty() {
-                    div class="log-empty" { @if task.state == TaskState::Pending { "This task has not started yet." } @else if task.state == TaskState::Skipped { "This task was skipped because an earlier task failed." } @else { "No output yet." } }
+                    div class="log-empty" { @if task.state == TaskState::Pending { "This task has not started yet." } @else if task.state == TaskState::Skipped { "Skipped because an earlier task failed." } @else if task.state == TaskState::Running { "Waiting for output…" } @else { "No output." } }
                 } @else {
                     (render_log(task, text))
                 }
@@ -880,35 +1426,61 @@ fn render_log(task: &Task, text: &str) -> Markup {
             },
         }
     }
+    let mut number = 0;
+    let mut numbered = |lines: &[&str]| -> Markup {
+        html! { div class="lines" { @for line in lines { (ansi::line(task.ordinal, { number += 1; number }, line)) } } }
+    };
+    let preamble_markup = (!preamble.is_empty() || sections.is_empty()).then(|| numbered(&preamble));
+    let section_markup: Vec<(usize, Markup)> =
+        sections.iter().map(|(index, lines)| (*index, numbered(lines))).collect();
     html! {
-        @if !preamble.is_empty() || sections.is_empty() {
-            div class="lines" { @for line in &preamble { (ansi::line(line)) } }
-        }
-        @for (index, lines) in &sections {
-            @let step = task.steps.iter().find(|s| s.ordinal == *index as i64);
+        @if let Some(markup) = preamble_markup { (markup) }
+        @for (position, (index, lines)) in section_markup.into_iter().enumerate() {
+            @let step = task.steps.iter().find(|s| s.ordinal == index as i64);
             @let state = step.map(|s| s.state).unwrap_or(TaskState::Running);
             @let open = matches!(state, TaskState::Running | TaskState::Failed | TaskState::TimedOut);
-            details open[open] data-open-last[*index + 1 == sections.len() && open] {
+            details open[open] data-open-last[position + 1 == sections.len() && open] {
                 summary {
+                    (icon(Icon::Chevron))
                     span class={"dot " (task_kind(state).0)} {}
                     span class="name" { (step.map(|s| s.name.clone()).unwrap_or_else(|| format!("Step {}", index + 1))) }
-                    span class="time" {
-                        @if let Some(step) = step {
-                            @match (step.started_at, step.finished_at) {
-                                (Some(start), Some(end)) => (duration(end - start)),
-                                (Some(start), None) => span data-started=(start) { "" },
-                                _ => "",
-                            }
-                        }
-                    }
+                    span class="time" { @if let Some(step) = step { (elapsed(step.started_at, step.finished_at)) } }
                 }
-                div class="lines" { @for line in lines { (ansi::line(line)) } }
+                (lines)
             }
         }
     }
 }
 
-pub fn system(ctx: &Context<'_>, facts: &[(&str, String)], audit: &[(AuditEntry, Option<String>)]) -> Markup {
+pub struct SystemData {
+    pub facts: Vec<(&'static str, String)>,
+    pub audit: Vec<(AuditEntry, Option<(String, String)>)>,
+    pub active: usize,
+    pub slots: usize,
+    pub enrolled: usize,
+    pub visible: usize,
+}
+
+fn action(action: &str) -> (&'static str, Icon, &'static str) {
+    match action {
+        "build_triggered" => ("started a build", Icon::Play, ""),
+        "build_cancelled" => ("cancelled a build", Icon::Stop, ""),
+        "build_rerun" => ("reran a build", Icon::Rerun, ""),
+        "image_released" => ("released", Icon::Rocket, "ok"),
+        "cache_reset" => ("reset the build cache of", Icon::Trash, ""),
+        "registry_drift" => ("found versions published outside Kiln in", Icon::Alert, "warn"),
+        "registry_drift_dismissed" => ("dismissed the registry warning of", Icon::Check, ""),
+        "repository_enrolled" => ("started building", Icon::Book, "ok"),
+        "repository_paused" => ("paused", Icon::Pause, "warn"),
+        "repository_resumed" => ("resumed", Icon::Play, ""),
+        "login" => ("signed in", Icon::User, ""),
+        "login_denied" => ("was refused sign-in", Icon::Alert, "bad"),
+        _ => ("", Icon::Activity, ""),
+    }
+}
+
+pub fn system(ctx: &Context<'_>, data: &SystemData) -> Markup {
+    let github = data.facts.iter().find(|(k, _)| *k == "GitHub API").map(|(_, v)| v.clone());
     layout(
         "System",
         "system",
@@ -916,40 +1488,67 @@ pub fn system(ctx: &Context<'_>, facts: &[(&str, String)], audit: &[(AuditEntry,
         &[("page", "system".into())],
         html! {
             div class="page-head" {
-                div { h1 { "System" } div class="sub" { "Kiln " (VERSION) @if ctx.demo { " · demo mode" } } }
-                div class="actions" {
-                    form method="post" action="/system/refresh" { button class="button" type="submit" { (icon(Icon::Refresh)) "Check GitHub now" } }
+                div class="titles" {
+                    h1 { "System" }
+                    div class="lede" { "Kiln " (VERSION) }
+                }
+                div class="actions" { (refresh_button()) }
+            }
+            div class="tiles" {
+                div class="card tile" {
+                    span class="label" { (icon(Icon::Layers)) "Version" }
+                    span class="value mono" { (VERSION) }
+                    span class="foot" { @if ctx.demo { "Demo mode" } @else { "Running" } }
+                }
+                div class="card tile" {
+                    span class="label" { (icon(Icon::Gauge)) "Build slots" }
+                    span class="value" { (data.active) small { "of " (data.slots) " busy" } }
+                    div class="meter" { @for slot in 0..data.slots { span class=(if slot < data.active { "on" } else { "" }) {} } }
+                }
+                a class="card tile" href="/repos" {
+                    span class="label" { (icon(Icon::Book)) "Repositories" }
+                    span class="value" { (data.enrolled) small { "of " (data.visible) " use Kiln" } }
+                }
+                div class="card tile" {
+                    span class="label" { (PreEscaped(GITHUB)) "GitHub API" }
+                    span class="value" style="font-size:15px" { (github.unwrap_or_else(|| "–".into())) }
                 }
             }
-            div class="grid" {
+            div class="columns" {
                 section class="card" {
-                    h2 { "Activity" }
-                    @if audit.is_empty() {
-                        div class="empty" { p { "Nothing recorded yet." } }
+                    div class="card-head" { h2 { "Activity" } }
+                    @if data.audit.is_empty() {
+                        (empty(Icon::Activity, "Nothing recorded yet", html! {}))
                     } @else {
-                        table class="table" {
-                            thead { tr { th { "When" } th { "Who" } th { "What" } } }
-                            tbody {
-                                @for (entry, link) in audit {
-                                    tr {
-                                        td class="when" { (time(entry.at)) }
-                                        td { (entry.actor) }
-                                        td {
-                                            @match link {
-                                                Some(link) => a href=(link) { (entry.action.replace('_', " ")) },
-                                                None => (entry.action.replace('_', " ")),
-                                            }
-                                            @if let Some(detail) = &entry.detail { " " span class="hint" { (detail) } }
+                        ul class="activity" {
+                            @for (entry, target) in &data.audit {
+                                @let (verb, glyph, tone) = action(&entry.action);
+                                li {
+                                    span class={"ico " (tone)} { (icon(glyph)) }
+                                    div class="what" {
+                                        strong { (entry.actor) } " "
+                                        @match (entry.action.as_str(), entry.detail.as_deref().and_then(|d| d.split_once(' '))) {
+                                            ("image_released", Some((reference, digest))) => {
+                                                "released " code { (reference.rsplit('/').next().unwrap_or(reference)) }
+                                                @if let Some((link, label)) = target { " from " a href=(link) { (label) } }
+                                                span class="detail mono" { (digest) }
+                                            },
+                                            _ => {
+                                                @if verb.is_empty() { (entry.action.replace('_', " ")) } @else { (verb) }
+                                                @if let Some((link, label)) = target { " " a href=(link) { (label) } }
+                                                @if let Some(detail) = &entry.detail { span class="detail" { (detail) } }
+                                            },
                                         }
                                     }
+                                    span class="when" { (time(entry.at)) }
                                 }
                             }
                         }
                     }
                 }
                 aside class="card" {
-                    h2 { "Configuration" }
-                    dl class="facts" { @for (key, value) in facts { dt { (key) } dd { (value) } } }
+                    div class="card-head" { h2 { "Configuration" } }
+                    dl class="facts" { @for (key, value) in data.facts.iter().filter(|(k, _)| *k != "GitHub API") { dt { (key) } dd { (value) } } }
                 }
             }
         },

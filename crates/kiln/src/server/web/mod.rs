@@ -70,6 +70,7 @@ pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
             get(|| async { asset("text/javascript; charset=utf-8", include_str!("assets/kiln.js")) }),
         )
         .route("/assets/favicon.svg", get(|| async { asset("image/svg+xml", include_str!("assets/favicon.svg")) }))
+        .route("/assets/favicon-{state}", get(favicon))
         .route("/{owner}/{repo}", get(repo_page::<P>))
         .route("/{owner}/{repo}/build", post(trigger::<P>))
         .route("/{owner}/{repo}/pause", post(pause::<P>))
@@ -97,6 +98,20 @@ pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
             HeaderValue::from_static("DENY"),
         ))
         .with_state(web)
+}
+
+async fn favicon(Path(state): Path<String>) -> Response {
+    let color = match state.trim_end_matches(".svg") {
+        "ok" => "#16a34a",
+        "bad" => "#dc2626",
+        "run" => "#2563eb",
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let body = include_str!("assets/favicon.svg").replace(
+        "</svg>",
+        &format!(r##"<circle cx="19" cy="19" r="4.5" fill="{color}" stroke="#fff" stroke-width="1.5"/></svg>"##),
+    );
+    ([(CONTENT_TYPE, "image/svg+xml"), (CACHE_CONTROL, "public, max-age=86400")], body).into_response()
 }
 
 fn asset(kind: &'static str, body: &'static str) -> Response {
@@ -236,48 +251,100 @@ fn repo_named<P: Platform>(web: &Web<P>, owner: &str, name: &str) -> WebResult<R
         .ok_or_else(|| WebError::NotFound(format!("Kiln does not know {owner}/{name}.")))
 }
 
-fn latest<P: Platform>(web: &Web<P>, repos: &[Repo]) -> WebResult<Vec<views::RepoSummary>> {
+fn latest<P: Platform>(web: &Web<P>, repos: &[Repo]) -> WebResult<Vec<views::RepoRow>> {
     let store = &web.engine.store;
     let mut out = Vec::new();
     for repo in repos {
         let builds = store.builds(&BuildFilter { repo: Some(repo.id), limit: 40, ..Default::default() })?;
-        let main = builds.iter().find(|b| b.trigger != Trigger::PullRequest).cloned();
+        let last = builds.iter().find(|b| b.trigger != Trigger::PullRequest).cloned();
         let version = builds
             .iter()
             .find(|b| {
                 b.state == BuildState::Succeeded && b.detail.as_deref().is_some_and(|d| d.starts_with("Released"))
             })
             .and_then(|b| b.version.clone());
-        out.push((repo.clone(), main, version));
+        let mut recent: Vec<_> = builds.into_iter().take(12).collect();
+        recent.reverse();
+        out.push(views::RepoRow { repo: repo.clone(), last, version, recent });
     }
+    out.sort_by(|a, b| {
+        let at = |row: &views::RepoRow| row.recent.last().map(|b| b.created_at).unwrap_or(0);
+        at(b).cmp(&at(a)).then_with(|| a.repo.name.cmp(&b.repo.name))
+    });
     Ok(out)
 }
 
-fn dashboard_data<P: Platform>(web: &Web<P>) -> WebResult<views::DashboardData> {
+#[derive(Deserialize, Default)]
+struct DashboardQuery {
+    status: Option<String>,
+    repo: Option<String>,
+    before: Option<i64>,
+}
+
+fn dashboard_data<P: Platform>(web: &Web<P>, query: &DashboardQuery) -> WebResult<views::DashboardData> {
     let store = &web.engine.store;
+    let page = 30;
     let repos = store.repos()?;
     let mut active = store.active()?;
     active.reverse();
     let mut queued = store.queued()?;
     queued.reverse();
-    let recent = store
-        .builds(&BuildFilter { limit: 40, ..Default::default() })?
-        .into_iter()
-        .filter(|b| b.state.is_finished())
-        .take(25)
+    let status = views::Status::parse(query.status.as_deref());
+    let repo = query.repo.as_deref().and_then(|r| r.parse().ok()).filter(|id| repos.iter().any(|r| r.id == *id));
+    let mut builds = store.builds(&BuildFilter {
+        repo,
+        before: query.before,
+        states: status.states(),
+        limit: page + 1,
+        ..Default::default()
+    })?;
+    let more = (builds.len() as i64 > page).then(|| builds[page as usize - 1].id);
+    builds.truncate(page as usize);
+    let finished =
+        store.builds(&BuildFilter { states: views::Status::All.states(), limit: 200, ..Default::default() })?;
+    let day = unix_now() - 86_400;
+    let today = finished.iter().filter(|b| b.finished_at.unwrap_or(b.created_at) >= day);
+    let judged: Vec<_> = finished
+        .iter()
+        .filter(|b| matches!(b.state, BuildState::Succeeded | BuildState::Failed | BuildState::Errored))
+        .take(50)
+        .cloned()
         .collect();
-    let visible: Vec<Repo> = repos.iter().filter(|r| r.removed_at.is_none()).cloned().collect();
-    let latest = latest(web, &visible)?;
-    Ok(views::DashboardData { repos, active, queued, recent, latest, slots: web.engine.settings.slots })
+    let stats = views::Stats {
+        passed_day: today.clone().filter(|b| b.state == BuildState::Succeeded).count(),
+        failed_day: today.filter(|b| matches!(b.state, BuildState::Failed | BuildState::Errored)).count(),
+        rate: (!judged.is_empty())
+            .then(|| (judged.iter().filter(|b| b.state == BuildState::Succeeded).count(), judged.len())),
+        median: views::median(&judged),
+    };
+    Ok(views::DashboardData {
+        repos,
+        active,
+        queued,
+        builds,
+        more,
+        status,
+        repo,
+        slots: web.engine.settings.slots,
+        stats,
+    })
 }
 
-async fn dashboard<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebResult<Response> {
+async fn dashboard<P: Platform>(
+    State(web): State<Arc<Web<P>>>,
+    user: User,
+    Query(query): Query<DashboardQuery>,
+) -> WebResult<Response> {
     let viewer = viewer(&user);
-    Ok(render(views::dashboard(&context(&web, &viewer), &dashboard_data(&web)?)))
+    Ok(render(views::dashboard(&context(&web, &viewer), &dashboard_data(&web, &query)?)))
 }
 
-async fn fragment_dashboard<P: Platform>(State(web): State<Arc<Web<P>>>, _user: User) -> WebResult<Response> {
-    Ok(render(views::dashboard_live(&dashboard_data(&web)?)))
+async fn fragment_dashboard<P: Platform>(
+    State(web): State<Arc<Web<P>>>,
+    _user: User,
+    Query(query): Query<DashboardQuery>,
+) -> WebResult<Response> {
+    Ok(render(views::dashboard_live(&dashboard_data(&web, &query)?)))
 }
 
 async fn repos<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebResult<Response> {
@@ -328,7 +395,18 @@ fn repo_data<P: Platform>(web: &Web<P>, repo: Repo, paging: &Paging) -> WebResul
         .filter(|b| b.trigger != Trigger::PullRequest)
         .find_map(|b| b.config.and_then(|text| config::parse(&text, &repo.name).ok()));
     let busy = store.active()?.iter().any(|b| b.repo_id == repo.id);
-    Ok(views::RepoData { repo, builds, releases, config, more, busy, show })
+    let mut history: Vec<_> = store
+        .builds(&BuildFilter {
+            repo: Some(repo.id),
+            states: views::Status::All.states(),
+            limit: 40,
+            ..Default::default()
+        })?
+        .into_iter()
+        .filter(|b| !matches!(b.state, BuildState::Skipped | BuildState::Superseded))
+        .collect();
+    history.reverse();
+    Ok(views::RepoData { repo, builds, history, releases, config, more, busy, show })
 }
 
 async fn repo_page<P: Platform>(
@@ -413,14 +491,15 @@ async fn fragment_build<P: Platform>(
 
 async fn fragment_tasks<P: Platform>(
     State(web): State<Arc<Web<P>>>,
-    _user: User,
+    user: User,
     Path(id): Path<i64>,
     Query(query): Query<AttemptQuery>,
 ) -> WebResult<Response> {
     let build = web.engine.store.build(id)?.ok_or_else(|| WebError::NotFound("build not found".into()))?;
     let data = build_data(&web, build, query.attempt)?;
-    let mut markup = views::tasks_card(&data, views::default_task(&data.tasks)).into_string();
-    if !data.images.is_empty() {
+    let viewer = viewer(&user);
+    let mut markup = views::sidebar(&context(&web, &viewer), &data, views::default_task(&data.tasks)).into_string();
+    if data.images.iter().any(|i| i.digest.is_some()) {
         markup
             .push_str(&format!("<template data-images>{}</template>", views::images_card(&data.images).into_string()));
     }
@@ -612,18 +691,33 @@ async fn system<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebR
     let store = &web.engine.store;
     let mut audit = Vec::new();
     for entry in store.audit_log(100)? {
-        let link = match entry.build_id {
+        let target = match entry.build_id {
             Some(id) => store.build(id)?.and_then(|build| {
-                store.repo(build.repo_id).ok().flatten().map(|repo| views::build_path(&repo, &build))
+                store
+                    .repo(build.repo_id)
+                    .ok()
+                    .flatten()
+                    .map(|repo| (views::build_path(&repo, &build), format!("{} #{}", repo.name, build.number)))
             }),
             None => match entry.repo_id {
-                Some(id) => store.repo(id)?.map(|repo| views::repo_path(&repo)),
+                Some(id) => store.repo(id)?.map(|repo| (views::repo_path(&repo), repo.name.clone())),
                 None => None,
             },
         };
-        audit.push((entry, link));
+        let detail =
+            entry.detail.clone().filter(|d| target.as_ref().is_none_or(|(_, label)| !d.ends_with(label.as_str())));
+        audit.push((kiln_store::AuditEntry { detail, ..entry }, target));
     }
-    Ok(render(views::system(&context(&web, &viewer), &facts, &audit)))
+    let repos = store.repos()?;
+    let data = views::SystemData {
+        facts,
+        audit,
+        active: store.active()?.len(),
+        slots: settings.slots,
+        enrolled: repos.iter().filter(|r| r.enrolled && r.removed_at.is_none()).count(),
+        visible: repos.iter().filter(|r| r.removed_at.is_none()).count(),
+    };
+    Ok(render(views::system(&context(&web, &viewer), &data)))
 }
 
 async fn events<P: Platform>(

@@ -141,4 +141,4 @@ Kiln writes a copy of its database to `kiln.backup.db` in the data directory eve
 kiln demo --port 8080
 ```
 
-The demo runs the real engine and UI against simulated repositories, builds and logs, on `127.0.0.1`.
+The demo runs the real engine and UI against simulated repositories, builds and logs, on `127.0.0.1`. It starts with a few days of build history and pushes a new commit every minute or so.
