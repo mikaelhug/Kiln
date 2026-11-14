@@ -44,10 +44,11 @@ pub struct Queued {
 pub struct Active {
     pub id: BuildId,
     pub repo: RepoId,
+    pub holds_slot: bool,
 }
 
 pub fn next_dispatch(queued: &[Queued], active: &[Active], slots: usize, now: i64) -> Option<BuildId> {
-    if active.len() >= slots {
+    if active.iter().filter(|build| build.holds_slot).count() >= slots {
         return None;
     }
     let waits_for_branch_build = |tag: &Queued| {
@@ -83,11 +84,11 @@ mod tests {
             queued(4, 3, Trigger::Tag("v1.0.0".into()), 20),
         ];
         assert_eq!(next_dispatch(&queue, &[], 2, 100), Some(BuildId(4)));
-        let busy = [Active { id: BuildId(4), repo: RepoId(3) }];
+        let busy = [Active { id: BuildId(4), repo: RepoId(3), holds_slot: true }];
         assert_eq!(next_dispatch(&queue, &busy, 2, 100), Some(BuildId(1)));
-        let full = [busy[0], Active { id: BuildId(1), repo: RepoId(1) }];
+        let full = [busy[0], Active { id: BuildId(1), repo: RepoId(1), holds_slot: true }];
         assert_eq!(next_dispatch(&queue, &full, 2, 100), None);
-        let repo_one_busy = [Active { id: BuildId(1), repo: RepoId(1) }];
+        let repo_one_busy = [Active { id: BuildId(1), repo: RepoId(1), holds_slot: true }];
         assert_eq!(next_dispatch(&queue[..2], &repo_one_busy, 2, 100), None);
     }
 
@@ -100,6 +101,13 @@ mod tests {
         let queue = [branch, tag];
         assert_eq!(next_dispatch(&queue, &[], 2, 100), Some(BuildId(1)));
         assert_eq!(next_dispatch(&queue[1..], &[], 2, 100), Some(BuildId(2)));
+    }
+
+    #[test]
+    fn releasing_builds_keep_their_repository_but_free_their_slot() {
+        let queue = [queued(1, 1, Trigger::DefaultBranch, 1), queued(2, 2, Trigger::DefaultBranch, 2)];
+        let releasing = [Active { id: BuildId(9), repo: RepoId(1), holds_slot: false }];
+        assert_eq!(next_dispatch(&queue, &releasing, 1, 100), Some(BuildId(2)));
     }
 
     #[test]

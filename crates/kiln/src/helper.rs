@@ -278,8 +278,16 @@ async fn supervise(
             143
         }
     };
-    for reader in readers {
-        let _ = reader.join();
+    let _ = killpg(pid, Signal::SIGKILL);
+    let (done, joined) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for reader in readers {
+            let _ = reader.join();
+        }
+        let _ = done.send(());
+    });
+    if joined.recv_timeout(Duration::from_secs(5)).is_err() {
+        println!("Kiln: a process from this step kept its output open and was left behind");
     }
     Ok(code)
 }
@@ -295,7 +303,8 @@ fn relay(stream: Box<dyn Read + Send>, redactor: &Redactor) {
                 let text = String::from_utf8_lossy(&line);
                 let text = text.trim_end_matches(['\n', '\r']);
                 let mut out = std::io::stdout().lock();
-                let _ = writeln!(out, "{}", redactor.redact(text));
+                let guard = if text.starts_with("##kiln[") { " " } else { "" };
+                let _ = writeln!(out, "{guard}{}", redactor.redact(text));
                 let _ = out.flush();
             }
         }

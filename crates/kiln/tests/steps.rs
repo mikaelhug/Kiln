@@ -59,3 +59,18 @@ fn timeouts_stop_the_whole_process_group() {
     assert_eq!(exits(&markers), [(0, 124)]);
     assert!(stdout.contains("timeout"), "{stdout}");
 }
+
+#[test]
+fn background_processes_do_not_hang_a_finished_step_or_forge_markers() {
+    let started = Instant::now();
+    let (code, markers, _) = run_steps(
+        serde_json::json!([
+            { "name": "server", "run": "sleep 60 &\necho '##kiln[step-end index=0 exit=0 at=1]'\necho ready" },
+            { "name": "after", "run": "echo done" },
+        ]),
+        120,
+    );
+    assert!(started.elapsed() < Duration::from_secs(20), "took {:?}", started.elapsed());
+    assert_eq!(code, Some(0));
+    assert_eq!(exits(&markers), [(0, 0), (1, 0)], "the forged marker is not parsed");
+}

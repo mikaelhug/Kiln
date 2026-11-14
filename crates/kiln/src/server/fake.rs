@@ -50,6 +50,7 @@ struct State {
     failing: HashSet<String>,
     lost: HashSet<String>,
     off_branch: HashSet<String>,
+    refuse_promotes: bool,
     generation: u64,
 }
 
@@ -111,6 +112,11 @@ impl Fake {
             title: title.into(),
         });
         state.generation += 1;
+    }
+
+    #[cfg(test)]
+    pub fn refuse_promotes(&self) {
+        self.state().refuse_promotes = true;
     }
 
     #[cfg(test)]
@@ -482,6 +488,9 @@ impl Platform for Arc<Fake> {
 
     async fn promote(&self, repository: &str, digest: &str, tag: &str) -> Result<Promotion> {
         let mut state = self.state();
+        if state.refuse_promotes {
+            bail!("403 Forbidden: the token may not write {repository}");
+        }
         let tags = state.registry.entry(repository.into()).or_default();
         match tags.get(tag) {
             Some(existing) if existing == digest => Ok(Promotion::AlreadyThere),

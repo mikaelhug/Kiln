@@ -36,8 +36,9 @@ pub struct Engine<P: Platform> {
     reconcile_rx: Mutex<Option<mpsc::UnboundedReceiver<Option<i64>>>>,
     followed: Mutex<HashSet<(String, String)>>,
     finalized: Mutex<HashSet<(i64, i64, i64)>>,
-    fetch_tokens: Mutex<HashMap<i64, String>>,
+    fetch_tokens: Mutex<HashMap<(i64, i64), String>>,
     releasing: Mutex<HashSet<i64>>,
+    dispatching: Mutex<HashSet<i64>>,
 }
 
 fn now() -> i64 {
@@ -64,6 +65,7 @@ impl<P: Platform> Engine<P> {
             finalized: Mutex::new(HashSet::new()),
             fetch_tokens: Mutex::new(HashMap::new()),
             releasing: Mutex::new(HashSet::new()),
+            dispatching: Mutex::new(HashSet::new()),
         })
     }
 
@@ -271,8 +273,7 @@ impl<P: Platform> Engine<P> {
                 if !config::parse(&text, &repo.name).map(|c| c.on.pull_request).unwrap_or(true) {
                     continue;
                 }
-                let message =
-                    self.platform.commit_message(&repo, &pull.head_sha).await.ok().or(Some(pull.title.clone()));
+                let message = Some(pull.title.clone());
                 self.enqueue(
                     &repo,
                     Trigger::PullRequest,
@@ -450,7 +451,22 @@ impl<P: Platform> Engine<P> {
     pub fn cancel(&self, id: i64, actor: &str) -> Result<()> {
         let build = self.store.build(id)?.ok_or_else(|| anyhow!("build {id} does not exist"))?;
         if build.state == BuildState::Releasing {
-            anyhow::bail!("this build is already releasing and cannot be cancelled");
+            if self.store.images(id)?.iter().any(|i| i.released.is_some()) {
+                anyhow::bail!("this build has already released some of its images and cannot be cancelled");
+            }
+            if !self.releasing.lock().expect("releasing set").insert(id) {
+                anyhow::bail!("Kiln is copying this build's images right now; try again in a moment");
+            }
+            self.finish(
+                id,
+                BuildState::Cancelled,
+                None,
+                Some(format!("Cancelled by {actor} before anything was released")),
+            )?;
+            self.releasing.lock().expect("releasing set").remove(&id);
+            self.audit(actor, "build_cancelled", Some(build.repo_id), Some(id), None);
+            self.scheduler.notify_one();
+            return Ok(());
         }
         self.cancel_build(&build, &format!("Cancelled by {actor}"))?;
         self.audit(actor, "build_cancelled", Some(build.repo_id), Some(id), None);
@@ -586,7 +602,11 @@ impl<P: Platform> Engine<P> {
             .store
             .active()?
             .into_iter()
-            .map(|b| schedule::Active { id: BuildId(b.id), repo: RepoId(b.repo_id) })
+            .map(|b| schedule::Active {
+                id: BuildId(b.id),
+                repo: RepoId(b.repo_id),
+                holds_slot: b.state != BuildState::Releasing,
+            })
             .collect();
         Ok(schedule::next_dispatch(&queued, &active, self.settings.slots, now()).map(|id| id.0))
     }
@@ -601,12 +621,18 @@ impl<P: Platform> Engine<P> {
                 ..Default::default()
             },
         )?;
-        match self.launch(&build).await {
+        self.dispatching.lock().expect("dispatching set").insert(id);
+        let result = self.launch(&build).await;
+        self.dispatching.lock().expect("dispatching set").remove(&id);
+        match result {
             Ok(()) => Ok(()),
             Err(error) => {
                 let detail = format!("{error:#}");
-                if error.downcast_ref::<Refusal>().is_some() {
-                    self.finish(id, BuildState::Failed, Some(Failure::Version), Some(detail))?;
+                if self.store.build(id)?.is_some_and(|b| b.state != BuildState::Starting) {
+                    return Err(error);
+                }
+                if let Some(refusal) = error.downcast_ref::<Refusal>() {
+                    self.finish(id, BuildState::Failed, Some(refusal.failure), Some(refusal.message.clone()))?;
                 } else if build.attempt < self.settings.max_attempts {
                     self.update(
                         id,
@@ -629,11 +655,11 @@ impl<P: Platform> Engine<P> {
     async fn launch(&self, build: &Build) -> Result<()> {
         let repo = self.store.repo(build.repo_id)?.context("the repository is gone")?;
         let text = build.config.clone().context("the build has no configuration")?;
-        let config = config::parse(&text, &repo.name).map_err(|d| anyhow!(render_diagnostics(&d)))?;
+        let config = config::parse(&text, &repo.name).map_err(|d| Refusal::config(render_diagnostics(&d)))?;
         let names: Vec<String> = config.images.iter().map(|i| i.name.clone()).collect();
         let pull_request = build.trigger == Trigger::PullRequest;
         if !pull_request && !build.trusted {
-            return Err(Refusal(format!(
+            return Err(Refusal::config(format!(
                 "{} points at a commit that is not on {}; Kiln only builds and releases tags reachable from the default branch",
                 build.ref_name, repo.default_branch
             ))
@@ -647,7 +673,12 @@ impl<P: Platform> Engine<P> {
             && let Some((_, images)) = self.store.verified_candidate(repo.id, &build.sha)?
             && images.iter().map(|i| &i.name).eq(names.iter())
         {
-            let version = version::tag_version(&build.ref_name).map_err(|e| Refusal(e.to_string()))?;
+            let version = version::tag_version(&build.ref_name).map_err(|e| Refusal::version(e.to_string()))?;
+            let mut published = Vec::new();
+            for image in &config.images {
+                published.extend(self.platform.registry_tags(&self.settings.repository_for(&image.name)).await?);
+            }
+            version::assess(&version.version, &published).map_err(|e| Refusal::version(e.to_string()))?;
             for image in &images {
                 if let Some(digest) = &image.digest {
                     self.store.set_candidate(build.id, &image.name, digest)?;
@@ -661,6 +692,7 @@ impl<P: Platform> Engine<P> {
                     phase: Some(Some(Phase::Release)),
                     version: Some(Some(version.version.to_string())),
                     detail: Some(Some("Reusing the image already built and verified for this commit".into())),
+                    not_before: Some(now() + self.settings.release_window_secs),
                     ..Default::default()
                 },
             )?;
@@ -672,7 +704,7 @@ impl<P: Platform> Engine<P> {
                 if let Some(owner) = self.store.claim_image(&image.name, repo.id)? {
                     let owner =
                         self.store.repo(owner)?.map(|r| r.full_name()).unwrap_or_else(|| "another repository".into());
-                    return Err(Refusal(format!(
+                    return Err(Refusal::config(format!(
                         "the image {} belongs to {owner}; choose another image name",
                         image.name
                     ))
@@ -682,12 +714,25 @@ impl<P: Platform> Engine<P> {
         }
         let version = if pull_request { None } else { self.allocate(&repo, build, &config).await? };
         let token = self.platform.fetch_token(&repo).await.context("minting the fetch token")?;
-        let secret = format!("{}-fetch", pod_name(build.id, build.attempt));
-        self.fetch_tokens.lock().expect("fetch tokens").insert(build.id, token.token.clone());
-        if let Err(error) = self.platform.create_secret(&secret, build.id, "token", &token.token).await {
+        self.fetch_tokens.lock().expect("fetch tokens").insert((build.id, build.attempt), token.token.clone());
+        let started = self.start_pod(&repo, build, &config, version, &token.token).await;
+        if started.is_err() {
             self.forget_fetch_token(build.id, build.attempt).await;
-            return Err(error);
         }
+        started
+    }
+
+    async fn start_pod(
+        &self,
+        repo: &Repo,
+        build: &Build,
+        config: &Config,
+        version: Option<String>,
+        token: &str,
+    ) -> Result<()> {
+        let pull_request = build.trigger == Trigger::PullRequest;
+        let secret = format!("{}-fetch", pod_name(build.id, build.attempt));
+        self.platform.create_secret(&secret, build.id, "token", token).await?;
         let claim = cache_claim_name(&repo.full_name());
         self.platform.ensure_cache(&claim).await?;
         let repo_secret = self.settings.repo_secret(&repo.full_name());
@@ -700,7 +745,7 @@ impl<P: Platform> Engine<P> {
             event: event_name(build),
             version: version.as_deref(),
             run: build.number,
-            config: &config,
+            config,
             scope: if pull_request { Scope::TestsOnly } else { Scope::Full },
             trusted: build.trusted,
             fetch_secret: &secret,
@@ -708,12 +753,14 @@ impl<P: Platform> Engine<P> {
             cache_claim: Some(&claim),
             timeout_secs: self.settings.build_timeout_secs,
         };
-        let rendered = kiln_runner::render(&plan, &self.settings.runner).map_err(Refusal)?;
+        let rendered = kiln_runner::render(&plan, &self.settings.runner).map_err(Refusal::config)?;
         self.store.replace_tasks(build.id, build.attempt, &rendered.tasks)?;
         let name = pod_name(build.id, build.attempt);
-        if let Err(error) = self.platform.create_pod(&rendered.pod).await {
-            self.forget_fetch_token(build.id, build.attempt).await;
-            return Err(error);
+        self.platform.create_pod(&rendered.pod).await?;
+        let current = self.store.build(build.id)?.context("the build disappeared")?;
+        if current.state != BuildState::Starting {
+            self.platform.delete_pod(&name).await?;
+            return Ok(());
         }
         self.update(
             build.id,
@@ -721,7 +768,7 @@ impl<P: Platform> Engine<P> {
                 state: Some(BuildState::Running),
                 pod: Some(Some(name)),
                 version: Some(version),
-                detail: Some(None),
+                detail: if current.cancel_requested { None } else { Some(None) },
                 ..Default::default()
             },
         )?;
@@ -742,7 +789,7 @@ impl<P: Platform> Engine<P> {
             published.extend(self.platform.registry_tags(&self.settings.repository_for(&image.name)).await?);
         }
         let allocation = match build.trigger {
-            Trigger::Tag => version::tag_version(&build.ref_name).map_err(|e| Refusal(e.to_string()))?,
+            Trigger::Tag => version::tag_version(&build.ref_name).map_err(|e| Refusal::version(e.to_string()))?,
             _ if config.release.mode == ReleaseMode::Tags => return Ok(None),
             _ => {
                 let tags = match self.platform.tags(repo, None).await? {
@@ -756,7 +803,7 @@ impl<P: Platform> Engine<P> {
             Ok(Publish::Deploys | Publish::BelowCurrent { .. } | Publish::AlreadyPublished) => {
                 Ok(Some(allocation.version.to_string()))
             }
-            Err(error) => Err(Refusal(error.to_string()).into()),
+            Err(error) => Err(Refusal::version(error.to_string()).into()),
         }
     }
 
@@ -778,6 +825,7 @@ impl<P: Platform> Engine<P> {
         let pods: HashSet<String> = self.platform.pods().await?.into_iter().filter_map(|p| p.metadata.name).collect();
         for build in self.store.active()? {
             match build.state {
+                _ if self.dispatching.lock().expect("dispatching set").contains(&build.id) => {}
                 BuildState::Starting if build.pod.is_none() => {
                     self.update(build.id, BuildUpdate { state: Some(BuildState::Queued), ..Default::default() })?;
                 }
@@ -945,7 +993,12 @@ impl<P: Platform> Engine<P> {
         }
         self.update(
             build.id,
-            BuildUpdate { state: Some(BuildState::Releasing), phase: Some(Some(Phase::Release)), ..Default::default() },
+            BuildUpdate {
+                state: Some(BuildState::Releasing),
+                phase: Some(Some(Phase::Release)),
+                not_before: Some(now() + self.settings.release_window_secs),
+                ..Default::default()
+            },
         )?;
         self.release(build.id).await;
         Ok(())
@@ -958,11 +1011,28 @@ impl<P: Platform> Engine<P> {
         let result = self.promote_all(id).await;
         self.releasing.lock().expect("releasing set").remove(&id);
         if let Err(error) = result {
-            tracing::warn!(error = format!("{error:#}"), build = id, "releasing failed, will retry");
-            let _ = self.update(
-                id,
-                BuildUpdate { detail: Some(Some(format!("Release is retrying: {error:#}"))), ..Default::default() },
-            );
+            let expired = self
+                .store
+                .build(id)
+                .ok()
+                .flatten()
+                .is_some_and(|b| b.state == BuildState::Releasing && now() > b.not_before);
+            if expired {
+                tracing::warn!(error = format!("{error:#}"), build = id, "releasing failed for too long, giving up");
+                let _ = self.finish(
+                    id,
+                    BuildState::Failed,
+                    Some(Failure::Release),
+                    Some(format!("Releasing kept failing until the release window closed: {error:#}")),
+                );
+                self.scheduler.notify_one();
+            } else {
+                tracing::warn!(error = format!("{error:#}"), build = id, "releasing failed, will retry");
+                let _ = self.update(
+                    id,
+                    BuildUpdate { detail: Some(Some(format!("Release is retrying: {error:#}"))), ..Default::default() },
+                );
+            }
         }
     }
 
@@ -1094,7 +1164,7 @@ impl<P: Platform> Engine<P> {
     }
 
     async fn forget_fetch_token(&self, build: i64, attempt: i64) {
-        let token = self.fetch_tokens.lock().expect("fetch tokens").remove(&build);
+        let token = self.fetch_tokens.lock().expect("fetch tokens").remove(&(build, attempt));
         if let Some(token) = token
             && let Err(error) = self.platform.revoke(&token).await
         {
@@ -1381,11 +1451,24 @@ impl<P: Platform> Engine<P> {
 }
 
 #[derive(Debug)]
-pub struct Refusal(pub String);
+pub struct Refusal {
+    pub failure: Failure,
+    pub message: String,
+}
+
+impl Refusal {
+    fn config(message: impl Into<String>) -> Self {
+        Self { failure: Failure::Config, message: message.into() }
+    }
+
+    fn version(message: impl Into<String>) -> Self {
+        Self { failure: Failure::Version, message: message.into() }
+    }
+}
 
 impl std::fmt::Display for Refusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)
     }
 }
 

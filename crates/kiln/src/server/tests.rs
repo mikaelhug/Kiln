@@ -38,12 +38,18 @@ fn sha(n: u8) -> String {
 }
 
 async fn harness() -> Harness {
+    harness_with(|_| {}).await
+}
+
+async fn harness_with(adjust: impl FnOnce(&mut Settings)) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let fake = Arc::new(Fake::new(Pace::instant()));
     fake.add_repo(1, "kiln-demo", "web");
     fake.publish("kiln-demo/web", "0.0.1-rc.55", "sha256:old");
-    let settings =
-        Arc::new(Settings { retry_base_secs: 0, ..Settings::local(dir.path().to_owned(), "https://kiln.example") });
+    let mut settings =
+        Settings { retry_base_secs: 0, ..Settings::local(dir.path().to_owned(), "https://kiln.example") };
+    adjust(&mut settings);
+    let settings = Arc::new(settings);
     let (events, _) = broadcast::channel(1024);
     let logs = Arc::new(Logs::new(dir.path().to_owned(), events));
     let engine = Engine::new(Arc::new(Store::in_memory().unwrap()), Arc::new(fake.clone()), settings, logs);
@@ -247,4 +253,25 @@ async fn a_repository_cannot_release_into_another_repositorys_image() {
         "{:?}",
         intruder.detail
     );
+}
+
+#[tokio::test]
+async fn a_release_that_keeps_failing_gives_up_and_frees_its_slot() {
+    let h = harness_with(|s| {
+        s.release_window_secs = 0;
+        s.slots = 1;
+    })
+    .await;
+    h.fake.refuse_promotes();
+    h.fake.push(1, &sha(1), "Ship", Some(CONFIG));
+    h.sync().await;
+    h.until("the release to reach the registry", |b| {
+        b.first().is_some_and(|b| b.state == BuildState::Releasing || b.state.is_finished())
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    h.engine.release(h.builds()[0].id).await;
+    let builds = h.until("the release to give up", |b| b.first().is_some_and(|b| b.state.is_finished())).await;
+    assert_eq!(builds[0].state, BuildState::Failed);
+    assert_eq!(builds[0].failure, Some(Failure::Release));
 }
