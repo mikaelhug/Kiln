@@ -414,6 +414,10 @@ fn terminated(container: &Value, exit: i32) -> Value {
 }
 
 impl Platform for Arc<Fake> {
+    fn status(&self) -> Vec<(&'static str, String)> {
+        vec![("GitHub API", "simulated".into())]
+    }
+
     async fn repositories(&self) -> Result<Vec<RepoInfo>> {
         Ok(self.state().repos.clone())
     }

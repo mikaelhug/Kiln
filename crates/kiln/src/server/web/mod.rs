@@ -62,7 +62,7 @@ pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
         .route("/auth/callback", get(auth_callback::<P>))
         .route("/logout", post(logout::<P>))
         .route("/hooks/github", post(webhook::<P>))
-        .route("/healthz", get(|| async { "ok" }))
+        .route("/healthz", get(healthz::<P>))
         .route("/assets/kiln.css", get(|| async { asset("text/css; charset=utf-8", include_str!("assets/kiln.css")) }))
         .route(
             "/assets/kiln.js",
@@ -571,10 +571,20 @@ async fn refresh<P: Platform>(State(web): State<Arc<Web<P>>>, _user: User, heade
     Ok(flash(&back, "Checking GitHub for changes"))
 }
 
+async fn healthz<P: Platform>(State(web): State<Arc<Web<P>>>) -> (StatusCode, &'static str) {
+    match web.engine.store.ping() {
+        Ok(()) => (StatusCode::OK, "ok"),
+        Err(error) => {
+            tracing::error!(%error, "the database is not reachable");
+            (StatusCode::SERVICE_UNAVAILABLE, "database unavailable")
+        }
+    }
+}
+
 async fn system<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebResult<Response> {
     let viewer = viewer(&user);
     let settings = &web.engine.settings;
-    let facts = vec![
+    let mut facts = vec![
         ("Build slots", settings.slots.to_string()),
         ("Owners", settings.owners.join(", ")),
         ("Registry", settings.registry.clone()),
@@ -584,6 +594,7 @@ async fn system<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebR
         ("Attempts", settings.max_attempts.to_string()),
         ("User namespaces", if settings.runner.user_namespaces { "on".into() } else { "off".into() }),
     ];
+    facts.extend(web.engine.platform.status());
     let store = &web.engine.store;
     let mut audit = Vec::new();
     for entry in store.audit_log(100)? {

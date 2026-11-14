@@ -49,6 +49,11 @@ impl Store {
         self.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    pub fn ping(&self) -> Result<()> {
+        self.conn().query_row("SELECT 1", [], |_| Ok(()))?;
+        Ok(())
+    }
+
     pub fn backup(&self, target: &Path) -> Result<()> {
         let _ = std::fs::remove_file(target);
         self.conn().execute("VACUUM INTO ?1", [target.to_string_lossy()])?;

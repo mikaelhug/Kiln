@@ -26,6 +26,7 @@ pub enum PodEvent {
 }
 
 pub trait Platform: Send + Sync + 'static {
+    fn status(&self) -> Vec<(&'static str, String)>;
     fn repositories(&self) -> impl Future<Output = Result<Vec<RepoInfo>>> + Send;
     fn head(&self, repo: &Repo, etag: Option<&str>) -> impl Future<Output = Result<Conditional<Head>>> + Send;
     fn tags(&self, repo: &Repo, etag: Option<&str>) -> impl Future<Output = Result<Conditional<Vec<TagRef>>>> + Send;

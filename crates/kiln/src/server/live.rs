@@ -67,6 +67,20 @@ fn labels(build: Option<i64>) -> BTreeMap<String, String> {
 }
 
 impl Platform for Live {
+    fn status(&self) -> Vec<(&'static str, String)> {
+        let rate = self.github.rate_limit();
+        let remaining = match (rate.remaining, rate.reset) {
+            (Some(remaining), Some(reset)) => {
+                format!(
+                    "{remaining} requests left, resets in {} min",
+                    ((reset as i64 - kiln_github::unix_now()) / 60).max(0)
+                )
+            }
+            _ => "not measured yet".into(),
+        };
+        vec![("GitHub API", remaining)]
+    }
+
     async fn repositories(&self) -> Result<Vec<RepoInfo>> {
         let mut out = Vec::new();
         for installation in self.github.installations().await? {
