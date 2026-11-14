@@ -157,7 +157,7 @@ async fn start(State(flow): State<Arc<Flow>>) -> Html<String> {
         "Create the GitHub App",
         html! {
             h1 { "Create the Kiln GitHub App" }
-            p { "GitHub shows the app's name, permissions and events before anything is created. You can rename it there." }
+            p { "Review and confirm the app on GitHub." }
             form method="post" action=(flow.action) {
                 input type="hidden" name="manifest" value=(flow.manifest);
                 button type="submit" { "Continue on GitHub" }
@@ -188,7 +188,7 @@ async fn callback(State(flow): State<Arc<Flow>>, Query(query): Query<Callback>) 
             "Done",
             html! {
                 h1 { "Created " (created.name) }
-                p { "The credentials are in " code { (flow.out.display()) } ". Return to the terminal for the next steps." }
+                p { "Saved to " code { (flow.out.display()) } ". Continue in the terminal." }
             },
         ),
         Err(error) => page("Failed", html! { h1 { "Setup failed" } p { (error) } }),

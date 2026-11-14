@@ -159,7 +159,7 @@ impl IntoResponse for WebError {
             WebError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
             WebError::Internal(error) => {
                 tracing::error!(error = format!("{error:#}"), "request failed");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong. The details are in Kiln's log.".to_owned())
+                (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong.".to_owned())
             }
         };
         (status, views::error_page(None, status.as_u16(), &message)).into_response()
@@ -217,11 +217,7 @@ fn sign_in(parts: &Parts, next: String) -> WebError {
 fn same_origin<P: Platform>(web: &Web<P>, headers: &HeaderMap) -> WebResult<()> {
     let expected = web.engine.settings.public_url.as_str();
     let origin = headers.get(ORIGIN).and_then(|v| v.to_str().ok()).unwrap_or_default();
-    if origin == expected {
-        Ok(())
-    } else {
-        Err(WebError::Forbidden("This form was submitted from another site.".into()))
-    }
+    if origin == expected { Ok(()) } else { Err(WebError::Forbidden("Request from another site.".into())) }
 }
 
 fn context<'a, P: Platform>(web: &'a Web<P>, viewer: &'a Viewer) -> Context<'a> {
@@ -324,6 +320,23 @@ fn dashboard_data<P: Platform>(web: &Web<P>, query: &DashboardQuery) -> WebResul
         rate: (!judged.is_empty())
             .then(|| (judged.iter().filter(|b| b.state == BuildState::Succeeded).count(), judged.len())),
         median: views::median(&judged),
+        hours: {
+            let mut hours = vec![(0, 0); 24];
+            for build in &finished {
+                let at = build.finished_at.unwrap_or(build.created_at);
+                let age = (unix_now() - at).max(0) / 3600;
+                if age < 24 {
+                    let slot = &mut hours[23 - age as usize];
+                    match build.state {
+                        BuildState::Succeeded => slot.0 += 1,
+                        BuildState::Failed | BuildState::Errored => slot.1 += 1,
+                        _ => {}
+                    }
+                }
+            }
+            hours
+        },
+        recent: judged.iter().take(30).rev().map(|b| b.state).collect(),
     };
     Ok(views::DashboardData {
         repos,
@@ -592,7 +605,7 @@ async fn resume<P: Platform>(
     same_origin(&web, &headers)?;
     let repo = repo_named(&web, &owner, &name)?;
     web.engine.set_paused(repo.id, false, &user.login)?;
-    Ok(flash(&views::repo_path(&repo), "Resumed; checking GitHub for new commits"))
+    Ok(flash(&views::repo_path(&repo), "Resumed"))
 }
 
 async fn reset_cache<P: Platform>(
@@ -604,7 +617,7 @@ async fn reset_cache<P: Platform>(
     same_origin(&web, &headers)?;
     let repo = repo_named(&web, &owner, &name)?;
     let message = match web.engine.reset_cache(repo.id, &user.login).await {
-        Ok(()) => "Cache deleted; the next build starts cold".to_owned(),
+        Ok(()) => "Cache reset".to_owned(),
         Err(error) => format!("Could not reset the cache: {error:#}"),
     };
     Ok(flash(&views::repo_path(&repo), &message))
@@ -769,11 +782,11 @@ async fn login<P: Platform>(
         jar = jar.add(cookie("kiln_next", next, 600));
     }
     let error = query.error.as_deref().map(|code| match code {
-        "expired" => "The sign-in took too long. Please try again.",
-        "verify" => "The sign-in could not be verified. Please try again.",
-        "denied" => "This GitHub account is not allowed to use this Kiln.",
-        "config" => "GitHub sign-in is not configured on this server.",
-        _ => "GitHub sign-in failed. Please try again.",
+        "expired" => "Sign-in expired. Try again.",
+        "verify" => "Sign-in failed. Try again.",
+        "denied" => "This account has no access.",
+        "config" => "GitHub sign-in is not configured.",
+        _ => "Sign-in failed. Try again.",
     });
     (jar, render(views::login(error, web.demo))).into_response()
 }

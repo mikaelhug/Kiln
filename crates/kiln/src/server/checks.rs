@@ -22,7 +22,7 @@ pub fn headline(build: &Build) -> String {
     let detail = build.detail.clone().unwrap_or_default();
     match build.state {
         BuildState::Queued if detail.starts_with("Retrying") => {
-            format!("Queued for another attempt: {}", detail.trim_start_matches("Retrying: "))
+            format!("Retrying: {}", detail.trim_start_matches("Retrying: "))
         }
         BuildState::Queued => "Waiting for a build slot".into(),
         BuildState::Starting | BuildState::Running => phase_label(build.phase).into(),
@@ -35,7 +35,7 @@ pub fn headline(build: &Build) -> String {
             _ => first_line(&detail).unwrap_or("Failed").to_owned(),
         },
         BuildState::Errored => {
-            format!("Kiln could not run this build: {}", first_line(&detail).unwrap_or("unknown error"))
+            format!("Could not run: {}", first_line(&detail).unwrap_or("unknown error"))
         }
         BuildState::Cancelled | BuildState::Superseded | BuildState::Skipped => {
             first_line(&detail).unwrap_or(build.state.as_str()).to_owned()

@@ -386,7 +386,7 @@ impl<P: Platform> Engine<P> {
             config: config_text,
             state: if skip { BuildState::Skipped } else { BuildState::Queued },
             failure: None,
-            detail: skip.then(|| "Skipped because the commit message asks to skip CI".to_owned()),
+            detail: skip.then(|| "Skipped by [skip ci]".to_owned()),
             rerun_of,
             created_at: now(),
         };
@@ -462,12 +462,7 @@ impl<P: Platform> Engine<P> {
                 if self.store.images(id)?.iter().any(|i| i.released.is_some()) {
                     anyhow::bail!("this build has already released some of its images and cannot be cancelled");
                 }
-                self.finish(
-                    id,
-                    BuildState::Cancelled,
-                    None,
-                    Some(format!("Cancelled by {actor} before anything was released")),
-                )
+                self.finish(id, BuildState::Cancelled, None, Some(format!("Cancelled by {actor}")))
             })();
             self.releasing.lock().expect("releasing set").remove(&id);
             outcome?;
@@ -723,7 +718,7 @@ impl<P: Platform> Engine<P> {
                     state: Some(BuildState::Releasing),
                     phase: Some(Some(Phase::Release)),
                     version: Some(Some(version.version.to_string())),
-                    detail: Some(Some("Reusing the image already built and verified for this commit".into())),
+                    detail: Some(Some("Reusing the verified image".into())),
                     not_before: Some(now() + self.settings.release_window_secs),
                     ..Default::default()
                 },
@@ -1008,7 +1003,7 @@ impl<P: Platform> Engine<P> {
         let tags_only = config.as_ref().is_some_and(|c| c.release.mode == ReleaseMode::Tags);
         if build.trigger == Trigger::PullRequest || build.version.is_none() {
             let detail = (tags_only && build.trigger != Trigger::PullRequest)
-                .then(|| "Candidate built and verified; this repository releases on tags".to_owned());
+                .then(|| "Candidate ready; releases on tags".to_owned());
             self.finish(build.id, BuildState::Succeeded, None, detail)?;
             return Ok(());
         }
@@ -1051,7 +1046,7 @@ impl<P: Platform> Engine<P> {
                     id,
                     BuildState::Failed,
                     Some(Failure::Release),
-                    Some(format!("Releasing kept failing until the release window closed: {error:#}")),
+                    Some(format!("Release failed: {error:#}")),
                 );
                 self.scheduler.notify_one();
             } else {
@@ -1141,7 +1136,7 @@ impl<P: Platform> Engine<P> {
             self.scheduler.notify_one();
             return Ok(());
         }
-        let detail = "the build pod disappeared, for example because its node was drained".to_owned();
+        let detail = "the build pod disappeared".to_owned();
         if build.attempt < self.settings.max_attempts {
             self.update(
                 build.id,

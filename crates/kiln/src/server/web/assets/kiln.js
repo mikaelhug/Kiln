@@ -546,10 +546,14 @@ function enhance(root) {
   }
   const input = root.querySelector("[data-find]");
   if (input) {
+    let typing;
     input.addEventListener("input", () => {
-      log.query = input.value.trim().toLowerCase();
-      log.hit = -1;
-      find(log.query ? 1 : false);
+      clearTimeout(typing);
+      typing = setTimeout(() => {
+        log.query = input.value.trim().toLowerCase();
+        log.hit = -1;
+        find(log.query ? 1 : false);
+      }, 120);
     });
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {

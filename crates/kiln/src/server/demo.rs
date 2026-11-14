@@ -225,7 +225,7 @@ fn seed(store: &Store, logs: &Logs, fake: &Fake) -> Result<()> {
             BuildState::Failed => "unit failed: Error: 1 test failed: renders the checkout page".to_owned(),
             BuildState::Cancelled => "Cancelled by demo".to_owned(),
             _ if history.releases => format!("Released {version}"),
-            _ => "Candidate built and verified; this repository releases on tags".to_owned(),
+            _ => "Candidate ready; releases on tags".to_owned(),
         };
         let id = store
             .insert_build(&NewBuild {

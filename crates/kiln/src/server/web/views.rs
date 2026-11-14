@@ -255,7 +255,7 @@ pub fn build_row(build: &Build, repo: Option<&Repo>, show_repo: bool) -> Markup 
     let live = build.state.is_active() || build.state == BuildState::Queued;
     let failed = kind(build.state) == "bad";
     html! {
-        li class="build-row" {
+        li class=(if failed { "build-row failed" } else { "build-row" }) {
             (status(build.state, ""))
             div class="main" {
                 a class="title" href=(href) title=(commit_title(build)) { (commit_title(build)) }
@@ -353,7 +353,7 @@ fn empty(glyph: Icon, title: &str, body: Markup) -> Markup {
 fn refresh_button() -> Markup {
     html! {
         form method="post" action="/system/refresh" {
-            button class="button" type="submit" title="Look for new commits, tags and pull requests now" { (icon(Icon::Refresh)) "Check GitHub" }
+            button class="button" type="submit" title="Check for new commits" { (icon(Icon::Refresh)) "Check GitHub" }
         }
     }
 }
@@ -368,7 +368,7 @@ pub fn login(error: Option<&str>, demo: bool) -> Markup {
                     div class="card auth-card" {
                         span class="mark" { (PreEscaped(LOGO)) }
                         h1 { "Sign in to Kiln" }
-                        p { "Builds, tests and releases for your private repositories." }
+                        p { "Self-hosted CI" }
                         @if let Some(error) = error {
                             div class="banner bad" { (icon(Icon::Alert)) div class="text" { (error) } }
                         }
@@ -454,6 +454,8 @@ impl Status {
 pub struct Stats {
     pub passed_day: usize,
     pub failed_day: usize,
+    pub hours: Vec<(usize, usize)>,
+    pub recent: Vec<BuildState>,
     pub rate: Option<(usize, usize)>,
     pub median: Option<i64>,
 }
@@ -490,10 +492,7 @@ pub fn dashboard(ctx: &Context<'_>, data: &DashboardData) -> Markup {
         &[("page", "dashboard".into())],
         html! {
             div class="page-head" {
-                div class="titles" {
-                    h1 { "Builds" }
-                    div class="lede" { "Every build across your repositories" }
-                }
+                div class="titles" { h1 { "Builds" } }
                 div class="actions" { (refresh_button()) }
             }
             div id="live" { (dashboard_live(data)) }
@@ -526,14 +525,12 @@ pub fn dashboard_live(data: &DashboardData) -> Markup {
             div class="card tile" {
                 span class="label" { (icon(Icon::Activity)) "Last 24 hours" }
                 span class="value" { (day_total) small { @if day_total == 1 { "build" } @else { "builds" } } }
-                @if day_total > 0 {
-                    div class="split" {
-                        span class="ok" style={"flex:" (stats.passed_day)} {}
-                        span class="bad" style={"flex:" (stats.failed_day)} {}
+                span class="foot" { (stats.passed_day) " passed · " (stats.failed_day) " failed" }
+                @let peak = stats.hours.iter().map(|(ok, bad)| ok + bad).max().unwrap_or(0).max(1);
+                div class="spark" aria-hidden="true" {
+                    @for (ok, bad) in &stats.hours {
+                        span { i class="bad" style={"height:" ((bad * 100) / peak) "%"} {} i class="ok" style={"height:" ((ok * 100) / peak) "%"} {} }
                     }
-                    span class="foot" { (stats.passed_day) " passed · " (stats.failed_day) " failed" }
-                } @else {
-                    span class="foot" { "No finished builds" }
                 }
             }
             div class="card tile" {
@@ -541,7 +538,8 @@ pub fn dashboard_live(data: &DashboardData) -> Markup {
                 @match stats.rate {
                     Some((passed, total)) => {
                         span class={"value " (if passed * 10 >= total * 9 { "ok" } else if passed * 2 < total { "bad" } else { "" })} { (passed * 100 / total.max(1)) "%" }
-                        span class="foot" { "Last " (total) " builds" @if let Some(median) = stats.median { " · median " (duration(median)) } }
+                        span class="foot" { "Last " (total) @if let Some(median) = stats.median { " · median " (duration(median)) } }
+                        div class="results" aria-hidden="true" { @for state in &stats.recent { span class=(kind(*state)) {} } }
                     },
                     None => { span class="value" { "–" } span class="foot" { "No finished builds yet" } },
                 }
@@ -583,7 +581,7 @@ pub fn dashboard_live(data: &DashboardData) -> Markup {
                     } @else if data.status != Status::All || data.repo.is_some() {
                         (empty(Icon::Search, "No matching builds", html! { a class="button small" href="/" { "Clear filters" } }))
                     } @else {
-                        (empty(Icon::Activity, "No builds yet", html! { p { "Builds appear here when you push to a repository that uses Kiln." } }))
+                        (empty(Icon::Activity, "No builds yet", html! {}))
                     }
                 } @else {
                     ul class="builds" { @for build in &data.builds { (build_row(build, repo(build.repo_id), true)) } }
@@ -601,7 +599,7 @@ fn onboarding() -> Markup {
         Icon::Rocket,
         "Add Kiln to a repository",
         html! {
-            p { "Commit a " code { (FILE_NAME) } " to the default branch of a repository the Kiln GitHub App can see." }
+            p { "Commit a " code { (FILE_NAME) } " to a repository's default branch." }
             pre { "version = 1\n\n[test.unit]\nimage = \"node:26\"\nsteps = [\"npm ci\", \"npm test\"]" }
         },
     )
@@ -622,10 +620,7 @@ pub fn repos(ctx: &Context<'_>, rows: &[RepoRow]) -> Markup {
         &[("page", "repos".into())],
         html! {
             div class="page-head" {
-                div class="titles" {
-                    h1 { "Repositories" }
-                    div class="lede" { "Repositories the Kiln GitHub App can see" }
-                }
+                div class="titles" { h1 { "Repositories" } }
                 div class="actions" {
                     label class="search" {
                         (icon(Icon::Search))
@@ -859,11 +854,11 @@ pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
                         summary class="button icon-only" aria-label="More actions" title="More actions" { (icon(Icon::More)) }
                         div class="menu-panel" {
                             @if !repo.paused {
-                                form method="post" action={(repo_path(repo)) "/pause"} data-confirm="Kiln ignores new pushes, tags and pull requests until you resume." data-confirm-title={"Pause " (repo.name) "?"} data-confirm-action="Pause" {
+                                form method="post" action={(repo_path(repo)) "/pause"} data-confirm="New pushes are ignored until you resume." data-confirm-title={"Pause " (repo.name) "?"} data-confirm-action="Pause" {
                                     button class="menu-item" type="submit" { (icon(Icon::Pause)) "Pause builds" }
                                 }
                             }
-                            form method="post" action={(repo_path(repo)) "/reset-cache"} data-confirm="The next build starts without cached dependencies or layers." data-confirm-title="Reset the build cache?" data-confirm-action="Reset cache" data-confirm-danger {
+                            form method="post" action={(repo_path(repo)) "/reset-cache"} data-confirm="The next build starts cold." data-confirm-title="Reset the build cache?" data-confirm-action="Reset cache" data-confirm-danger {
                                 button class="menu-item danger" type="submit" disabled[data.busy] title=(if data.busy { "Wait until the running build finishes" } else { "" }) { (icon(Icon::Trash)) "Reset build cache" }
                             }
                         }
@@ -872,14 +867,14 @@ pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
             }
         }
         @if repo.paused {
-            div class="banner warn" { (icon(Icon::Pause)) div class="text" { strong { "Builds are paused" } span class="hint" { "New pushes, tags and pull requests are ignored." } } }
+            div class="banner warn" { (icon(Icon::Pause)) div class="text" { strong { "Builds paused" } } }
         }
         @if let Some(drift) = &repo.drift {
             div class="banner warn" {
                 (icon(Icon::Alert))
                 div class="text" {
                     strong { "Published outside Kiln" }
-                    span class="hint" { "These versions appeared in the registry without a Kiln release: " code { (drift) } }
+                    span class="hint" { code { (drift) } }
                     form method="post" action={(repo_path(repo)) "/dismiss-drift"} { button class="button small" type="submit" { "Dismiss" } }
                 }
             }
@@ -888,7 +883,7 @@ pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
             div class="banner bad" { (icon(Icon::Alert)) div class="text" { strong { (FILE_NAME) " on " (repo.default_branch) " has errors" } pre { (error) } } }
         }
         @if !repo.enrolled && repo.removed_at.is_none() {
-            div class="banner wait" { (icon(Icon::Clock)) div class="text" { strong { "Not using Kiln yet" } span class="hint" { "Commit a " code { (FILE_NAME) } " to " (repo.default_branch) " to start building." } } }
+            div class="banner wait" { (icon(Icon::Clock)) div class="text" { strong { "No " code { (FILE_NAME) } " on " (repo.default_branch) } } }
         }
         @if repo.enrolled || !data.history.is_empty() {
             div class="tiles" {
@@ -988,7 +983,7 @@ pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
                                 (match config.release.mode { ReleaseMode::Rc => "Every default-branch push and tag", ReleaseMode::Tags => "Tags only" })
                                 @if config.release.shadow { span class="pill warn" { "Shadow" } }
                             }
-                            dt { "Secret" } dd { code title="Kubernetes Secret in the build namespace that holds this repository's secrets" { (data.secret) } }
+                            dt { "Secret" } dd { code title="Repository secrets" { (data.secret) } }
                         }
                     }
                 }
@@ -1076,13 +1071,11 @@ pub fn build(ctx: &Context<'_>, data: &BuildData) -> Markup {
 
 fn no_tasks_message(build: &Build) -> &'static str {
     match build.state {
-        BuildState::Queued => "This build is waiting for a free build slot.",
-        BuildState::Skipped => "This build was skipped.",
-        BuildState::Failed if build.failure == Some(Failure::Config) => {
-            "Kiln could not read the configuration, so nothing ran."
-        }
-        _ if build.trigger == Trigger::Tag => "This release reused an image that was already built and verified.",
-        _ => "Nothing ran for this build.",
+        BuildState::Queued => "Waiting for a build slot",
+        BuildState::Skipped => "Skipped",
+        BuildState::Failed if build.failure == Some(Failure::Config) => "Invalid configuration",
+        _ if build.trigger == Trigger::Tag => "Released the verified image",
+        _ => "Nothing ran",
     }
 }
 
@@ -1129,7 +1122,7 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
             div class="actions" {
                 @if matches!(build.state, BuildState::Queued | BuildState::Starting | BuildState::Running)
                     || (build.state == BuildState::Releasing && data.images.iter().all(|i| i.released.is_none())) {
-                    form method="post" action={(path) "/cancel"} data-confirm=(if build.state == BuildState::Releasing { "Nothing is published." } else { "Running tasks are stopped and nothing is released." }) data-confirm-title={"Cancel build #" (build.number) "?"} data-confirm-action="Cancel build" data-confirm-danger {
+                    form method="post" action={(path) "/cancel"} data-confirm="Nothing is released." data-confirm-title={"Cancel build #" (build.number) "?"} data-confirm-action="Cancel build" data-confirm-danger {
                         button class="button danger" type="submit" { (icon(Icon::Stop)) "Cancel" }
                     }
                 }
@@ -1286,7 +1279,7 @@ fn banner(build: &Build, ahead: Option<usize>) -> Markup {
                 }
                 @if build.state.is_active() && build.state != BuildState::Releasing && title != phase_label(build.phase) { span class="hint" { (phase_label(build.phase)) } }
                 @if let Some(ahead) = ahead {
-                    span class="hint" { (match ahead { 0 => "Starts as soon as a build slot is free.".to_owned(), 1 => "1 build is ahead of it.".to_owned(), n => format!("{n} builds are ahead of it.") }) }
+                    span class="hint" { (match ahead { 0 => "Next in line".to_owned(), 1 => "1 build ahead".to_owned(), n => format!("{n} builds ahead") }) }
                 }
             }
         }
@@ -1416,10 +1409,10 @@ pub fn log_view(build: &Build, attempt: i64, task: &Task, text: &str, bytes: usi
             }
             div class="log-body" data-task=(task.ordinal) {
                 @if let Some(lines) = skipped {
-                    div class="log-empty" { (lines) " earlier lines are not shown. " a href=(raw) download { "Download the full log" } }
+                    div class="log-empty" { (lines) " earlier lines hidden · " a href=(raw) download { "Full log" } }
                 }
                 @if text.trim().is_empty() {
-                    div class="log-empty" { @if task.state == TaskState::Pending { "This task has not started yet." } @else if task.state == TaskState::Skipped { "Skipped because an earlier task failed." } @else if task.state == TaskState::Running { "Waiting for output…" } @else { "No output." } }
+                    div class="log-empty" { @if task.state == TaskState::Pending { "Not started" } @else if task.state == TaskState::Skipped { "Skipped" } @else if task.state == TaskState::Running { "Waiting for output…" } @else { "No output" } }
                 } @else {
                     (render_log(task, text, skipped.unwrap_or(0)))
                 }
@@ -1503,10 +1496,7 @@ pub fn system(ctx: &Context<'_>, data: &SystemData) -> Markup {
         &[("page", "system".into())],
         html! {
             div class="page-head" {
-                div class="titles" {
-                    h1 { "System" }
-                    div class="lede" { "Kiln " (VERSION) }
-                }
+                div class="titles" { h1 { "System" } }
                 div class="actions" { (refresh_button()) }
             }
             div class="tiles" {
