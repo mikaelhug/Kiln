@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
-pub use app::AppKey;
+pub use app::{AppKey, CreatedApp, ManifestOwner, convert_manifest};
 pub use checks::{Annotation, CheckConclusion, CheckOutput, CheckRun, CheckStatus};
 pub use oauth::{AuthorizeRequest, GitHubUser, OAuthApp, random_token};
 pub use repos::{Account, Compare, Head, Installation, PullRequest, Repository, TagRef, Token, download_tarball};

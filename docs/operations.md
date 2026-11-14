@@ -2,6 +2,17 @@
 
 ## 1. Create the GitHub App
 
+```bash
+kiln setup --url https://kiln.example.com
+```
+
+`kiln setup` opens a page that sends you to GitHub with the app already filled in: permissions, events, webhook and sign-in callback. GitHub shows everything before it creates the app, and you can rename it there. Add `--org <name>` to create it in an organization. Afterwards Kiln writes the app's private key, webhook secret and client secret to `kiln-secret.yaml` (readable only by you) and prints the values for `config.yaml` and the link to install the app.
+
+Install the app on **selected repositories** only.
+
+<details>
+<summary>Creating the app by hand</summary>
+
 In **Settings › Developer settings › GitHub Apps › New GitHub App**:
 
 | Field | Value |
@@ -13,13 +24,12 @@ In **Settings › Developer settings › GitHub Apps › New GitHub App**:
 | Webhook URL | `https://kiln.example.com/hooks/github` |
 | Webhook secret | a long random string (`openssl rand -hex 32`) |
 | Repository permissions | Contents: read · Checks: read and write · Pull requests: read · Metadata: read |
-| Subscribe to events | Push · Pull request · Check run · Create · Installation repositories · Repository |
+| Subscribe to events | Push · Pull request · Check run · Create · Repository |
 | Where can this app be installed | Only on this account |
 
-Then:
-1. Generate a private key.
-2. Note the App ID and the Client ID, and generate a client secret.
-3. Install the app on **selected repositories** only.
+Then generate a private key, note the App ID and the Client ID, and generate a client secret.
+
+</details>
 
 Adding a repository to the installation and committing a `.kiln.toml` is all a repository needs.
 
