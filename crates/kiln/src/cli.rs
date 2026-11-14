@@ -144,7 +144,13 @@ pub fn plan(file: &Path, repo: Option<String>, event: &Event, published: &[Strin
             println!("release none: \"tags\" mode only publishes tag pushes");
             return Ok(ExitCode::SUCCESS);
         }
-        _ => version::next_rc(&git_tags(file)?, published, 0),
+        _ => {
+            let tags = git_tags(file).unwrap_or_else(|error| {
+                eprintln!("note: {error:#}; assuming the repository has no release tags");
+                Vec::new()
+            });
+            version::next_rc(&tags, published, 0)
+        }
     };
     report(&config, &allocation, published)
 }
