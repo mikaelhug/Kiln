@@ -6,6 +6,7 @@ use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
 use kiln_core::config::{self, Config, FILE_NAME, ReleaseMode};
 use kiln_core::schedule::{self, BuildId, RepoId};
+use kiln_core::trust::{Origin, grant_secrets};
 use kiln_core::version::{self, Publish};
 use kiln_github::{Conditional, unix_now};
 use kiln_registry::Promotion;
@@ -241,8 +242,8 @@ impl<P: Platform> Engine<P> {
                     && config::parse(&text, &repo.name).map(|c| c.on.tags).unwrap_or(true)
                 {
                     let message = self.platform.commit_message(&repo, &sha).await.ok();
-                    let trusted = self.platform.on_default_branch(&repo, &sha).await.unwrap_or(false);
-                    self.enqueue_tag(&repo, &tag.name, &sha, message, trusted, text)?;
+                    let on_default_branch = self.platform.on_default_branch(&repo, &sha).await?;
+                    self.enqueue_tag(&repo, &tag.name, &sha, message, on_default_branch, text)?;
                 }
                 self.store.mark_tags_seen(repo.id, std::slice::from_ref(&tag.name))?;
             }
@@ -313,7 +314,7 @@ impl<P: Platform> Engine<P> {
         tag: &str,
         sha: &str,
         message: Option<String>,
-        trusted: bool,
+        on_default_branch: bool,
         text: String,
     ) -> Result<Option<i64>> {
         let build = NewBuild {
@@ -325,7 +326,7 @@ impl<P: Platform> Engine<P> {
             message,
             dedupe_key: format!("tag:{tag}:{sha}"),
             actor: None,
-            trusted,
+            trusted: grant_secrets(&Origin::Tag { on_default_branch }),
             config: Some(text),
             state: BuildState::Queued,
             failure: None,
@@ -362,6 +363,14 @@ impl<P: Platform> Engine<P> {
                 let lower = m.to_ascii_lowercase();
                 lower.contains("[skip ci]") || lower.contains("[skip kiln]") || lower.contains("[ci skip]")
             });
+        let origin = match trigger {
+            Trigger::Push => Origin::DefaultBranchPush,
+            Trigger::PullRequest => Origin::PullRequest,
+            Trigger::Tag => Origin::Tag { on_default_branch: false },
+            Trigger::Manual => Origin::Ui {
+                default_branch_head: repo.head_sha.as_deref() == Some(sha) || reference == repo.default_branch,
+            },
+        };
         let build = NewBuild {
             repo_id: repo.id,
             trigger,
@@ -370,7 +379,7 @@ impl<P: Platform> Engine<P> {
             sha: sha.to_owned(),
             message,
             dedupe_key,
-            trusted: trigger != Trigger::PullRequest,
+            trusted: grant_secrets(&origin),
             actor,
             config: config_text,
             state: if skip { BuildState::Skipped } else { BuildState::Queued },
@@ -623,6 +632,13 @@ impl<P: Platform> Engine<P> {
         let config = config::parse(&text, &repo.name).map_err(|d| anyhow!(render_diagnostics(&d)))?;
         let names: Vec<String> = config.images.iter().map(|i| i.name.clone()).collect();
         let pull_request = build.trigger == Trigger::PullRequest;
+        if !pull_request && !build.trusted {
+            return Err(Refusal(format!(
+                "{} points at a commit that is not on {}; Kiln only builds and releases tags reachable from the default branch",
+                build.ref_name, repo.default_branch
+            ))
+            .into());
+        }
         if !pull_request {
             self.store.set_images(build.id, &names)?;
         }

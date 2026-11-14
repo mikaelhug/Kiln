@@ -120,4 +120,5 @@ fn pull_requests_get_no_secrets_no_builder_and_their_own_cache() {
     assert!(cache.sub_path.unwrap().starts_with("steps-pr/"));
     let volumes: Vec<String> = rendered.pod.spec.unwrap().volumes.unwrap().into_iter().map(|v| v.name).collect();
     assert!(!volumes.contains(&"build-secrets".to_owned()));
+    assert!(render(&plan(&config, Scope::Full, false), &settings).is_err(), "untrusted plans never build images");
 }

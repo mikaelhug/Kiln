@@ -49,6 +49,7 @@ struct State {
     revoked: Vec<String>,
     failing: HashSet<String>,
     lost: HashSet<String>,
+    off_branch: HashSet<String>,
     generation: u64,
 }
 
@@ -110,6 +111,12 @@ impl Fake {
             title: title.into(),
         });
         state.generation += 1;
+    }
+
+    #[cfg(test)]
+    pub fn tag_off_branch(&self, repo: i64, name: &str, sha: &str) {
+        self.state().off_branch.insert(sha.into());
+        self.tag(repo, name, sha);
     }
 
     pub fn publish(&self, repository: &str, tag: &str, digest: &str) {
@@ -443,8 +450,8 @@ impl Platform for Arc<Fake> {
             .unwrap_or_else(|| "Release".into()))
     }
 
-    async fn on_default_branch(&self, _repo: &Repo, _sha: &str) -> Result<bool> {
-        Ok(true)
+    async fn on_default_branch(&self, _repo: &Repo, sha: &str) -> Result<bool> {
+        Ok(!self.state().off_branch.contains(sha))
     }
 
     async fn fetch_token(&self, _repo: &Repo) -> Result<Token> {

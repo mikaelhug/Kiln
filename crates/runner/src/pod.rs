@@ -307,6 +307,9 @@ impl Builder<'_> {
     }
 
     fn images(&mut self) -> Result<(), String> {
+        if !self.plan.trusted {
+            return Err("image builds only run for trusted builds".into());
+        }
         self.volumes.push(json!({ "name": "buildkit-run", "emptyDir": {} }));
         self.volumes.push(json!({ "name": "out", "emptyDir": { "sizeLimit": self.settings.output_size } }));
         let mut args =

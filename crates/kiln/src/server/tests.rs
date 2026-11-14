@@ -209,3 +209,23 @@ async fn versions_published_outside_kiln_are_flagged_but_existing_ones_are_not()
     h.engine.scan_registry().await.unwrap();
     assert_eq!(h.engine.store.repo(1).unwrap().unwrap().drift.as_deref(), Some("web:0.0.2"));
 }
+
+#[tokio::test]
+async fn a_tag_on_a_commit_outside_the_default_branch_is_never_built_or_released() {
+    let h = harness().await;
+    h.fake.push(1, &sha(1), "Base", Some(CONFIG));
+    h.sync().await;
+    h.until("the base build", |b| b.first().is_some_and(|b| b.state.is_finished())).await;
+    h.fake.push(1, &sha(1), "Base", Some(CONFIG));
+    h.fake.push(1, &sha(9), "Sneaky", Some(CONFIG));
+    h.fake.push(1, &sha(1), "Base", Some(CONFIG));
+    h.fake.tag_off_branch(1, "v9.9.9", &sha(9));
+    h.sync().await;
+    let builds =
+        h.until("the tag build", |b| b.iter().any(|b| b.trigger == Trigger::Tag && b.state.is_finished())).await;
+    let tag = builds.iter().find(|b| b.trigger == Trigger::Tag).unwrap();
+    assert!(!tag.trusted);
+    assert_eq!(tag.state, BuildState::Failed, "{:?}", tag.detail);
+    assert!(h.engine.store.tasks(tag.id, 1).unwrap().is_empty(), "no pod ran");
+    assert!(h.fake.registry_tag("kiln-demo/web", "9.9.9").is_none());
+}
