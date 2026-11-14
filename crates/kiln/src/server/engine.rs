@@ -568,6 +568,7 @@ impl<P: Platform> Engine<P> {
                 id: BuildId(b.id),
                 repo: RepoId(b.repo_id),
                 trigger: core_trigger(&b),
+                sha: b.sha.clone(),
                 created_at: b.created_at,
                 not_before: b.not_before,
             })

@@ -49,21 +49,61 @@ fn load(file: &Path, repo: Option<String>) -> Result<Result<Config, Vec<Diagnost
 }
 
 pub fn validate(file: &Path, repo: Option<String>, json: bool) -> Result<ExitCode> {
-    let diagnostics = load(file, repo)?.err().unwrap_or_default();
+    let (diagnostics, warnings) = match load(file, repo)? {
+        Ok(config) => (Vec::new(), local_warnings(directory(file), &config)),
+        Err(diagnostics) => (diagnostics, Vec::new()),
+    };
     if json {
         let rows: Vec<_> = diagnostics
             .iter()
-            .map(|d| serde_json::json!({ "path": d.path, "line": d.line, "message": d.message }))
+            .map(|d| serde_json::json!({ "level": "error", "path": d.path, "line": d.line, "message": d.message }))
+            .chain(warnings.iter().map(|w| serde_json::json!({ "level": "warning", "message": w })))
             .collect();
         println!("{}", serde_json::to_string_pretty(&rows)?);
-    } else if diagnostics.is_empty() {
-        println!("{} is valid", file.display());
     } else {
         for diagnostic in &diagnostics {
             println!("{diagnostic}");
         }
+        for warning in &warnings {
+            println!("warning: {warning}");
+        }
+        if diagnostics.is_empty() {
+            println!("{} is valid", file.display());
+        }
     }
     Ok(if diagnostics.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE })
+}
+
+fn local_warnings(root: &Path, config: &Config) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for image in &config.images {
+        let dockerfile = root.join(&image.file);
+        let Ok(text) = std::fs::read_to_string(&dockerfile) else {
+            warnings.push(format!("image {}: {} does not exist", image.name, image.file));
+            continue;
+        };
+        if !root.join(&image.context).is_dir() {
+            warnings.push(format!("image {}: context {} is not a directory", image.name, image.context));
+        }
+        for id in secret_mounts(&text) {
+            if !image.secrets.contains_key(&id) {
+                warnings.push(format!(
+                    "image {}: {} mounts the secret {id:?}, but [[images]].secrets does not provide it",
+                    image.name, image.file
+                ));
+            }
+        }
+    }
+    warnings
+}
+
+fn secret_mounts(dockerfile: &str) -> Vec<String> {
+    dockerfile
+        .split_whitespace()
+        .filter_map(|word| word.strip_prefix("--mount="))
+        .filter(|options| options.split(',').any(|o| o == "type=secret"))
+        .filter_map(|options| options.split(',').find_map(|o| o.strip_prefix("id=")).map(str::to_owned))
+        .collect()
 }
 
 pub fn plan(file: &Path, repo: Option<String>, event: &Event, published: &[String]) -> Result<ExitCode> {

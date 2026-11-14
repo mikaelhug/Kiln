@@ -577,6 +577,7 @@ fn triggers(on: &config::Triggers) -> String {
 }
 
 pub struct BuildData {
+    pub ahead: Option<usize>,
     pub repo: Repo,
     pub build: Build,
     pub attempt: i64,
@@ -649,7 +650,7 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                 h1 { (commit_title(build)) }
                 div class="sub" {
                     span class={"pill " (kind(build.state))} { (state_label(build.state)) }
-                    (trigger_pill(build))
+                    a class="plain" href=(trigger_url(ctx, repo, build)) target="_blank" rel="noopener" { (trigger_pill(build)) }
                     a href=(commit_url) target="_blank" rel="noopener" { code { (build.short_sha()) } }
                     @if let Some(version) = &build.version { span class="pill" { (icon(Icon::Tag)) (version) } }
                     @if let Some(actor) = &build.actor { span { "started by " (actor) } }
@@ -671,7 +672,7 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                 }
             }
         }
-        (banner(build))
+        (banner(build, data.ahead))
         @if build.attempt > 1 {
             div class="sub hint" style="margin:-8px 0 16px" {
                 "Attempt " (data.attempt) " of " (build.attempt) " · "
@@ -683,7 +684,16 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
     }
 }
 
-fn banner(build: &Build) -> Markup {
+fn trigger_url(ctx: &Context<'_>, repo: &Repo, build: &Build) -> String {
+    let base = format!("{}/{}", ctx.github_web, repo.full_name());
+    match build.trigger {
+        Trigger::PullRequest => format!("{base}/pull/{}", build.pr_number.unwrap_or_default()),
+        Trigger::Tag => format!("{base}/releases/tag/{}", build.ref_name),
+        Trigger::Push | Trigger::Manual => format!("{base}/tree/{}", build.ref_name),
+    }
+}
+
+fn banner(build: &Build, ahead: Option<usize>) -> Markup {
     let class = kind(build.state);
     let detail = build.detail.clone().unwrap_or_default();
     let config = build.failure == Some(kiln_store::Failure::Config);
@@ -698,6 +708,9 @@ fn banner(build: &Build) -> Markup {
                     @if config || detail.contains('\n') { pre { (detail) } } @else { (detail) }
                 }
                 @if build.state.is_active() && build.state != BuildState::Releasing && title != phase_label(build.phase) { span class="hint" { (phase_label(build.phase)) } }
+                @if let Some(ahead) = ahead {
+                    span class="hint" { (match ahead { 0 => "It starts as soon as a slot is free.".to_owned(), 1 => "1 build is ahead of it.".to_owned(), n => format!("{n} builds are ahead of it.") }) }
+                }
             }
         }
     }

@@ -349,7 +349,12 @@ fn build_data<P: Platform>(
         Some(id) => store.build(id)?,
         None => None,
     };
-    Ok(views::BuildData { repo, build, attempt, tasks, images, rerun_of })
+    let ahead = (build.state == BuildState::Queued).then(|| {
+        let rank =
+            |b: &kiln_store::Build| (b.trigger == Trigger::PullRequest, b.trigger != Trigger::Tag, b.created_at, b.id);
+        store.queued().map(|queued| queued.iter().filter(|other| rank(other) < rank(&build)).count()).unwrap_or(0)
+    });
+    Ok(views::BuildData { ahead, repo, build, attempt, tasks, images, rerun_of })
 }
 
 async fn build_page<P: Platform>(
