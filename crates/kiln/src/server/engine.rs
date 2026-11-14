@@ -1461,7 +1461,12 @@ impl<P: Platform> Engine<P> {
 
     async fn scan_repo_registry(&self, repo: &Repo) -> Result<()> {
         {
-            let latest = self.store.builds(&BuildFilter { repo: Some(repo.id), limit: 20, ..Default::default() })?;
+            let latest = self.store.builds(&BuildFilter {
+                repo: Some(repo.id),
+                limit: 20,
+                with_config: true,
+                ..Default::default()
+            })?;
             let Some(config) = latest
                 .iter()
                 .filter(|b| b.trigger != Trigger::PullRequest)

@@ -398,7 +398,7 @@ fn repo_data<P: Platform>(web: &Web<P>, repo: Repo, paging: &Paging) -> WebResul
         .take(8)
         .collect();
     let config = store
-        .builds(&BuildFilter { repo: Some(repo.id), limit: 20, ..Default::default() })?
+        .builds(&BuildFilter { repo: Some(repo.id), limit: 20, with_config: true, ..Default::default() })?
         .into_iter()
         .filter(|b| b.trigger != Trigger::PullRequest)
         .find_map(|b| b.config.and_then(|text| config::parse(&text, &repo.name).ok()));

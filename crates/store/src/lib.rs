@@ -280,7 +280,9 @@ impl Store {
     }
 
     pub fn builds(&self, filter: &BuildFilter) -> Result<Vec<Build>> {
-        let mut sql = format!("SELECT {BUILD_COLUMNS} FROM builds WHERE 1 = 1");
+        let columns =
+            if filter.with_config { BUILD_COLUMNS.to_owned() } else { BUILD_COLUMNS.replacen(" config,", " NULL,", 1) };
+        let mut sql = format!("SELECT {columns} FROM builds WHERE 1 = 1");
         let mut values: Vec<rusqlite::types::Value> = Vec::new();
         if let Some(repo) = filter.repo {
             values.push(repo.into());

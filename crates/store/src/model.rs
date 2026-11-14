@@ -219,6 +219,7 @@ pub struct BuildFilter {
     pub sha: Option<String>,
     pub triggers: Vec<Trigger>,
     pub limit: i64,
+    pub with_config: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
