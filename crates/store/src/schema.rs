@@ -165,6 +165,11 @@ CREATE TABLE image_owners (
     repo_id INTEGER NOT NULL REFERENCES repos (id)
 );
 ",
+    r"
+INSERT OR IGNORE INTO image_owners (image, repo_id)
+SELECT i.name, b.repo_id FROM images i JOIN builds b ON b.id = i.build_id
+WHERE i.released IS NOT NULL ORDER BY b.id;
+",
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

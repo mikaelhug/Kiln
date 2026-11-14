@@ -250,11 +250,7 @@ impl Platform for Live {
     }
 
     async fn logs(&self, pod: &str, container: &str) -> Result<String> {
-        let params = LogParams {
-            container: Some(container.to_owned()),
-            limit_bytes: Some(2 * super::logs::MAX_LOG_BYTES as i64),
-            ..LogParams::default()
-        };
+        let params = LogParams { container: Some(container.to_owned()), ..LogParams::default() };
         match self.pods.logs(pod, &params).await {
             Ok(text) => Ok(text),
             Err(error) if is_status(&error, 404) || is_status(&error, 400) => Ok(String::new()),

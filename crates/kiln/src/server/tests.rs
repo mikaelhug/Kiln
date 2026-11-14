@@ -210,7 +210,11 @@ async fn versions_published_outside_kiln_are_flagged_but_existing_ones_are_not()
     h.sync().await;
     h.until("the release", |b| b.first().is_some_and(|b| b.state == BuildState::Succeeded)).await;
     h.engine.scan_registry().await.unwrap();
-    assert_eq!(h.engine.store.repo(1).unwrap().unwrap().drift, None, "the baseline and Kiln's own release are known");
+    h.fake.push(1, &sha(2), "Ship again", Some(CONFIG));
+    h.sync().await;
+    h.until("the second release", |b| b.len() == 2 && b[1].state == BuildState::Succeeded).await;
+    h.engine.scan_registry().await.unwrap();
+    assert_eq!(h.engine.store.repo(1).unwrap().unwrap().drift, None, "the baseline and Kiln's own releases are known");
     h.fake.publish("kiln-demo/web", "0.0.2", "sha256:elsewhere");
     h.engine.scan_registry().await.unwrap();
     assert_eq!(h.engine.store.repo(1).unwrap().unwrap().drift.as_deref(), Some("web:0.0.2"));
@@ -274,4 +278,24 @@ async fn a_release_that_keeps_failing_gives_up_and_frees_its_slot() {
     let builds = h.until("the release to give up", |b| b.first().is_some_and(|b| b.state.is_finished())).await;
     assert_eq!(builds[0].state, BuildState::Failed);
     assert_eq!(builds[0].failure, Some(Failure::Release));
+}
+
+#[tokio::test]
+async fn a_releasing_build_frees_its_slot_and_can_be_cancelled_before_anything_is_published() {
+    let h = harness_with(|s| s.slots = 1).await;
+    h.fake.refuse_promotes();
+    h.fake.push(1, &sha(1), "Ship", Some(CONFIG));
+    h.sync().await;
+    h.until("the release", |b| b.first().is_some_and(|b| b.state == BuildState::Releasing)).await;
+    h.fake.add_repo(2, "kiln-demo", "other");
+    h.fake.push(2, &sha(2), "Other", Some(&CONFIG.replace("\"web\"", "\"other\"")));
+    h.engine.reconcile_all(true).await.unwrap();
+    h.engine.poke(Some(2));
+    h.until("the other repository to start", |b| b.iter().any(|b| b.repo_id == 2 && b.state != BuildState::Queued))
+        .await;
+    let releasing = h.builds()[0].id;
+    h.engine.cancel(releasing, "tester").unwrap();
+    let builds = h.until("the cancel", |b| b[0].state.is_finished()).await;
+    assert_eq!(builds[0].state, BuildState::Cancelled);
+    assert!(h.fake.registry_tag("kiln-demo/web", "0.0.1-rc.56").is_none());
 }

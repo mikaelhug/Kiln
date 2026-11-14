@@ -118,6 +118,11 @@ impl Settings {
             default_memory: var("KILN_DEFAULT_MEMORY").unwrap_or_else(|| "2Gi".into()),
             memory_limit_factor: number("KILN_MEMORY_LIMIT_FACTOR", 2)?,
         };
+        if !runner.buildkit_rootless && !runner.user_namespaces {
+            bail!(
+                "KILN_BUILDKIT_ROOTLESS=false needs KILN_USER_NAMESPACES=true, otherwise BuildKit would run as root on the node"
+            );
+        }
         Ok(Self {
             listen: var("KILN_LISTEN").unwrap_or_else(|| "0.0.0.0:8080".into()).parse().context("KILN_LISTEN")?,
             public_url,

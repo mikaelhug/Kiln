@@ -224,8 +224,12 @@ impl Client {
         if response.status() == StatusCode::NOT_MODIFIED {
             return Ok(Conditional::NotModified);
         }
-        let etag = response.headers().get(ETAG).and_then(|v| v.to_str().ok()).map(str::to_owned);
         let next = next_link(response.headers());
+        let etag = if next.is_some() {
+            None
+        } else {
+            response.headers().get(ETAG).and_then(|v| v.to_str().ok()).map(str::to_owned)
+        };
         let mut value: Vec<T> = response.json().await?;
         if let Some(next) = next {
             value.extend(

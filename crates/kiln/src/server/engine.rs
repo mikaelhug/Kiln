@@ -452,19 +452,22 @@ impl<P: Platform> Engine<P> {
     pub fn cancel(&self, id: i64, actor: &str) -> Result<()> {
         let build = self.store.build(id)?.ok_or_else(|| anyhow!("build {id} does not exist"))?;
         if build.state == BuildState::Releasing {
-            if self.store.images(id)?.iter().any(|i| i.released.is_some()) {
-                anyhow::bail!("this build has already released some of its images and cannot be cancelled");
-            }
             if !self.releasing.lock().expect("releasing set").insert(id) {
                 anyhow::bail!("Kiln is copying this build's images right now; try again in a moment");
             }
-            self.finish(
-                id,
-                BuildState::Cancelled,
-                None,
-                Some(format!("Cancelled by {actor} before anything was released")),
-            )?;
+            let outcome = (|| {
+                if self.store.images(id)?.iter().any(|i| i.released.is_some()) {
+                    anyhow::bail!("this build has already released some of its images and cannot be cancelled");
+                }
+                self.finish(
+                    id,
+                    BuildState::Cancelled,
+                    None,
+                    Some(format!("Cancelled by {actor} before anything was released")),
+                )
+            })();
             self.releasing.lock().expect("releasing set").remove(&id);
+            outcome?;
             self.audit(actor, "build_cancelled", Some(build.repo_id), Some(id), None);
             self.scheduler.notify_one();
             return Ok(());
@@ -474,7 +477,7 @@ impl<P: Platform> Engine<P> {
         Ok(())
     }
 
-    pub fn rerun(&self, id: i64, actor: &str) -> Result<i64> {
+    pub async fn rerun(&self, id: i64, actor: &str) -> Result<i64> {
         let original = self.store.build(id)?.ok_or_else(|| anyhow!("build {id} does not exist"))?;
         let repo = self.store.repo(original.repo_id)?.ok_or_else(|| anyhow!("the repository is gone"))?;
         if !original.state.is_finished() {
@@ -492,7 +495,12 @@ impl<P: Platform> Engine<P> {
             message: original.message.clone(),
             dedupe_key: format!("rerun:{}:{}", original.id, kiln_github::random_token()),
             actor: Some(actor.to_owned()),
-            trusted: original.trusted,
+            trusted: match original.trigger {
+                Trigger::Tag => grant_secrets(&Origin::Tag {
+                    on_default_branch: self.platform.on_default_branch(&repo, &original.sha).await?,
+                }),
+                _ => original.trusted,
+            },
             config: original.config.clone(),
             state: BuildState::Queued,
             failure: None,
@@ -613,6 +621,7 @@ impl<P: Platform> Engine<P> {
     }
 
     async fn dispatch(self: Arc<Self>, id: i64) -> Result<()> {
+        self.dispatching.lock().expect("dispatching set").insert(id);
         let build = self.update(
             id,
             BuildUpdate {
@@ -621,8 +630,14 @@ impl<P: Platform> Engine<P> {
                 phase: Some(Some(Phase::Fetch)),
                 ..Default::default()
             },
-        )?;
-        self.dispatching.lock().expect("dispatching set").insert(id);
+        );
+        let build = match build {
+            Ok(build) => build,
+            Err(error) => {
+                self.dispatching.lock().expect("dispatching set").remove(&id);
+                return Err(error);
+            }
+        };
         let result = self.launch(&build).await;
         self.dispatching.lock().expect("dispatching set").remove(&id);
         match result {
@@ -667,6 +682,19 @@ impl<P: Platform> Engine<P> {
             .into());
         }
         if !pull_request {
+            for image in &config.images {
+                if let Some(owner) = self.store.claim_image(&image.name, repo.id)? {
+                    let owner =
+                        self.store.repo(owner)?.map(|r| r.full_name()).unwrap_or_else(|| "another repository".into());
+                    return Err(Refusal::config(format!(
+                        "the image {} belongs to {owner}; choose another image name",
+                        image.name
+                    ))
+                    .into());
+                }
+            }
+        }
+        if !pull_request {
             self.store.set_images(build.id, &names)?;
         }
         if build.trigger == Trigger::Tag
@@ -699,19 +727,6 @@ impl<P: Platform> Engine<P> {
             )?;
             self.release(build.id).await;
             return Ok(());
-        }
-        if !pull_request {
-            for image in &config.images {
-                if let Some(owner) = self.store.claim_image(&image.name, repo.id)? {
-                    let owner =
-                        self.store.repo(owner)?.map(|r| r.full_name()).unwrap_or_else(|| "another repository".into());
-                    return Err(Refusal::config(format!(
-                        "the image {} belongs to {owner}; choose another image name",
-                        image.name
-                    ))
-                    .into());
-                }
-            }
         }
         let version = if pull_request { None } else { self.allocate(&repo, build, &config).await? };
         let token = self.platform.fetch_token(&repo).await.context("minting the fetch token")?;
@@ -761,6 +776,7 @@ impl<P: Platform> Engine<P> {
         let current = self.store.build(build.id)?.context("the build disappeared")?;
         if current.state != BuildState::Starting {
             self.platform.delete_pod(&name).await?;
+            self.forget_fetch_token(build.id, build.attempt).await;
             return Ok(());
         }
         self.update(
@@ -1012,13 +1028,15 @@ impl<P: Platform> Engine<P> {
         let result = self.promote_all(id).await;
         self.releasing.lock().expect("releasing set").remove(&id);
         if let Err(error) = result {
-            let expired = self
-                .store
-                .build(id)
-                .ok()
-                .flatten()
-                .is_some_and(|b| b.state == BuildState::Releasing && now() > b.not_before);
-            if expired {
+            let Some(build) = self.store.build(id).ok().flatten().filter(|b| b.state == BuildState::Releasing) else {
+                return;
+            };
+            if build.not_before < build.started_at.unwrap_or(0) {
+                let _ = self.update(
+                    id,
+                    BuildUpdate { not_before: Some(now() + self.settings.release_window_secs), ..Default::default() },
+                );
+            } else if now() > build.not_before {
                 tracing::warn!(error = format!("{error:#}"), build = id, "releasing failed for too long, giving up");
                 let _ = self.finish(
                     id,
@@ -1039,6 +1057,9 @@ impl<P: Platform> Engine<P> {
 
     async fn promote_all(&self, id: i64) -> Result<()> {
         let build = self.store.build(id)?.context("the build is gone")?;
+        if build.state != BuildState::Releasing {
+            return Ok(());
+        }
         let version = build.version.clone().context("the build has no version")?;
         for image in self.store.images(id)? {
             if image.released.is_some() {
@@ -1046,9 +1067,9 @@ impl<P: Platform> Engine<P> {
             }
             let digest = image.digest.clone().with_context(|| format!("{} has no candidate digest", image.name))?;
             let repository = self.settings.repository_for(&image.name);
-            self.store.record_release(build.repo_id, &image.name, &version, now())?;
             match self.platform.promote(&repository, &digest, &version).await {
                 Ok(Promotion::Created | Promotion::AlreadyThere) => {
+                    self.store.record_release(build.repo_id, &image.name, &version, now())?;
                     self.store.set_released(id, &image.name, &version)?;
                     self.audit(
                         "kiln",
@@ -1205,8 +1226,22 @@ impl<P: Platform> Engine<P> {
                         }
                     }
                     let mut offset = 0i64;
-                    while let Some(chunk) = stream.next().await {
-                        let Ok(bytes) = chunk else { break };
+                    let mut pending: Vec<u8> = Vec::new();
+                    let mut ended = false;
+                    while !ended {
+                        match stream.next().await {
+                            Some(Ok(bytes)) => pending.extend_from_slice(&bytes),
+                            _ => ended = true,
+                        }
+                        let cut = if ended {
+                            pending.len()
+                        } else {
+                            pending.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1)
+                        };
+                        if cut == 0 {
+                            continue;
+                        }
+                        let bytes: Vec<u8> = pending.drain(..cut).collect();
                         let text = String::from_utf8_lossy(&bytes).into_owned();
                         let finalized = engine.finalized.lock().expect("finalized");
                         if finalized.contains(&(build_id, attempt, ordinal)) {
@@ -1275,8 +1310,9 @@ impl<P: Platform> Engine<P> {
         if self.finalized.lock().expect("finalized").contains(&(build.id, attempt, task.ordinal)) {
             return Ok(());
         }
+        let fetched = self.platform.logs(pod, &task.container).await;
         let live = self.logs.read(build.id, attempt, task.ordinal, 0);
-        let text = match self.platform.logs(pod, &task.container).await {
+        let text = match fetched {
             Ok(fetched) if fetched.len() >= live.len() => fetched,
             Ok(_) => live.clone(),
             Err(error) => {
@@ -1407,14 +1443,30 @@ impl<P: Platform> Engine<P> {
 
     pub async fn scan_registry(&self) -> Result<()> {
         for repo in self.store.repos()?.into_iter().filter(|r| r.enrolled && r.removed_at.is_none()) {
+            if let Err(error) = self.scan_repo_registry(&repo).await {
+                tracing::warn!(repo = repo.full_name(), error = format!("{error:#}"), "checking the registry failed");
+            }
+        }
+        Ok(())
+    }
+
+    async fn scan_repo_registry(&self, repo: &Repo) -> Result<()> {
+        {
             let latest = self.store.builds(&BuildFilter { repo: Some(repo.id), limit: 20, ..Default::default() })?;
             let Some(config) = latest
                 .iter()
                 .filter(|b| b.trigger != Trigger::PullRequest)
                 .find_map(|b| b.config.as_deref().and_then(|text| config::parse(text, &repo.name).ok()))
             else {
-                continue;
+                return Ok(());
             };
+            let releasing: Vec<String> = self
+                .store
+                .active()?
+                .into_iter()
+                .filter(|b| b.repo_id == repo.id && b.state == BuildState::Releasing)
+                .filter_map(|b| b.version)
+                .collect();
             let mut outside = Vec::new();
             for image in &config.images {
                 let tags: Vec<String> = self
@@ -1422,16 +1474,14 @@ impl<P: Platform> Engine<P> {
                     .registry_tags(&self.settings.repository_for(&image.name))
                     .await?
                     .into_iter()
-                    .filter(|tag| semver::Version::parse(tag).is_ok())
+                    .filter(|tag| semver::Version::parse(tag).is_ok() && !releasing.contains(tag))
                     .collect();
                 for tag in self.store.note_registry_tags(repo.id, &image.name, &tags, now())? {
                     outside.push(format!("{}:{tag}", image.name));
                 }
             }
             if !outside.is_empty() {
-                let mut message = repo.drift.clone().map(|d| format!("{d}, ")).unwrap_or_default();
-                message.push_str(&outside.join(", "));
-                self.store.set_drift(repo.id, Some(&message))?;
+                self.store.append_drift(repo.id, &outside.join(", "))?;
                 self.audit("kiln", "registry_drift", Some(repo.id), None, Some(outside.join(", ")));
                 let _ = self.logs.events().send(Event::Repo { repo: repo.id });
             }

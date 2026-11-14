@@ -63,6 +63,11 @@ impl Store {
     pub fn upsert_repo(&self, repo: &RepoSync) -> Result<()> {
         let conn = self.conn();
         conn.execute(
+            "UPDATE image_owners SET repo_id = ?3 WHERE repo_id IN
+               (SELECT id FROM repos WHERE owner = ?1 AND name = ?2 AND id != ?3 AND removed_at IS NOT NULL)",
+            params![repo.owner, repo.name, repo.id],
+        )?;
+        conn.execute(
             "UPDATE repos SET name = name || '~' || id WHERE owner = ?1 AND name = ?2 AND id != ?3",
             params![repo.owner, repo.name, repo.id],
         )?;
@@ -185,6 +190,12 @@ impl Store {
         let owner: i64 =
             conn.query_row("SELECT repo_id FROM image_owners WHERE image = ?1", [image], |row| row.get(0))?;
         Ok((owner != repo).then_some(owner))
+    }
+
+    pub fn append_drift(&self, repo: i64, text: &str) -> Result<()> {
+        self.conn()
+            .execute("UPDATE repos SET drift = COALESCE(drift || ', ', '') || ?2 WHERE id = ?1", params![repo, text])?;
+        Ok(())
     }
 
     pub fn set_drift(&self, repo: i64, drift: Option<&str>) -> Result<()> {

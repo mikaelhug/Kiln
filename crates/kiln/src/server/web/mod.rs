@@ -62,7 +62,8 @@ pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
         .route("/auth/callback", get(auth_callback::<P>))
         .route("/logout", post(logout::<P>))
         .route("/hooks/github", post(webhook::<P>))
-        .route("/healthz", get(healthz::<P>))
+        .route("/healthz", get(|| async { "ok" }))
+        .route("/readyz", get(readyz::<P>))
         .route("/assets/kiln.css", get(|| async { asset("text/css; charset=utf-8", include_str!("assets/kiln.css")) }))
         .route(
             "/assets/kiln.js",
@@ -554,7 +555,7 @@ async fn rerun<P: Platform>(
         .store
         .build_by_number(repo.id, number)?
         .ok_or_else(|| WebError::NotFound("build not found".into()))?;
-    match web.engine.rerun(build.id, &user.login) {
+    match web.engine.rerun(build.id, &user.login).await {
         Ok(id) => {
             let rerun = web.engine.store.build(id)?.ok_or_else(|| WebError::NotFound("build not found".into()))?;
             Ok(flash(&views::build_path(&repo, &rerun), &format!("Rerunning #{}", build.number)))
@@ -579,8 +580,13 @@ async fn refresh<P: Platform>(State(web): State<Arc<Web<P>>>, _user: User, heade
     Ok(flash(&back, "Checking GitHub for changes"))
 }
 
-async fn healthz<P: Platform>(State(web): State<Arc<Web<P>>>) -> (StatusCode, &'static str) {
-    match web.engine.store.ping() {
+async fn readyz<P: Platform>(State(web): State<Arc<Web<P>>>) -> (StatusCode, &'static str) {
+    let engine = web.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.store.ping())
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|r| r.map_err(anyhow::Error::from))
+    {
         Ok(()) => (StatusCode::OK, "ok"),
         Err(error) => {
             tracing::error!(%error, "the database is not reachable");
@@ -813,7 +819,7 @@ async fn webhook<P: Platform>(State(web): State<Arc<Web<P>>>, headers: HeaderMap
             let login = payload["sender"]["login"].as_str().unwrap_or("github");
             if let Some(build) = build
                 && web.engine.settings.allowed_users.contains(&sender)
-                && let Err(error) = web.engine.rerun(build, login)
+                && let Err(error) = web.engine.rerun(build, login).await
             {
                 tracing::warn!(error = format!("{error:#}"), build, "rerun from GitHub failed");
             }

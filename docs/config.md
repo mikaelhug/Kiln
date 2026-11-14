@@ -88,6 +88,8 @@ A release fails if its version would not be higher than the highest semver tag a
 | `timeout` | `"20m"` style, at most `"2h"` |
 | `resources` | `{ cpu = "1", memory = "2Gi" }` |
 
+Each step runs in its own process group. When a step ends, anything it started in the background is stopped, so a server needed by later steps belongs in `services`.
+
 Steps see `KILN_SHA`, `KILN_REF`, `KILN_EVENT` and `KILN_VERSION`. In verify jobs they also see `KILN_IMAGE_<NAME>`.
 
 ### Services
