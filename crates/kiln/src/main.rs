@@ -1,5 +1,6 @@
 mod cli;
 mod helper;
+mod server;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

@@ -36,7 +36,6 @@ text_enum!(Trigger, Push, {
     Tag => "tag",
     PullRequest => "pull_request",
     Manual => "manual",
-    Rerun => "rerun",
 });
 
 text_enum!(BuildState, Errored, {

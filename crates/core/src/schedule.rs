@@ -9,7 +9,6 @@ pub enum Trigger {
     Tag(String),
     DefaultBranch,
     Manual,
-    Rerun,
     PullRequest(u64),
 }
 
@@ -17,7 +16,7 @@ impl Trigger {
     pub fn priority(&self) -> u8 {
         match self {
             Trigger::Tag(_) => 0,
-            Trigger::DefaultBranch | Trigger::Manual | Trigger::Rerun => 1,
+            Trigger::DefaultBranch | Trigger::Manual => 1,
             Trigger::PullRequest(_) => 2,
         }
     }

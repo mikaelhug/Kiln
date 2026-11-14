@@ -475,7 +475,7 @@ impl Store {
             .conn()
             .query_row(
                 "SELECT b.id FROM builds b WHERE b.repo_id = ?1 AND b.sha = ?2 AND b.state = 'succeeded'
-                   AND b.trigger IN ('push', 'manual', 'rerun')
+                   AND b.trigger IN ('push', 'manual')
                    AND NOT EXISTS (SELECT 1 FROM images i WHERE i.build_id = b.id AND i.digest IS NULL)
                    AND EXISTS (SELECT 1 FROM images i WHERE i.build_id = b.id)
                  ORDER BY b.id DESC LIMIT 1",
