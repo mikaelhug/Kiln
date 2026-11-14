@@ -130,7 +130,7 @@ async fn activity(fake: Arc<Fake>, engine: Arc<Engine<Arc<Fake>>>) {
     loop {
         tokio::time::sleep(Duration::from_secs(70)).await;
         round += 1;
-        let repo = if round % 3 == 0 { 2 } else { 1 };
+        let repo = if round.is_multiple_of(3) { 2 } else { 1 };
         let message = MESSAGES[(round as usize) % MESSAGES.len()];
         let config = if repo == 1 { WEBSHOP } else { API };
         fake.push(repo, &sha(round * 7 + repo as u64), message, Some(config));

@@ -219,10 +219,7 @@ fn repo_named<P: Platform>(web: &Web<P>, owner: &str, name: &str) -> WebResult<R
         .ok_or_else(|| WebError::NotFound(format!("Kiln does not know {owner}/{name}.")))
 }
 
-fn latest<P: Platform>(
-    web: &Web<P>,
-    repos: &[Repo],
-) -> WebResult<Vec<(Repo, Option<kiln_store::Build>, Option<String>)>> {
+fn latest<P: Platform>(web: &Web<P>, repos: &[Repo]) -> WebResult<Vec<views::RepoSummary>> {
     let store = &web.engine.store;
     let mut out = Vec::new();
     for repo in repos {

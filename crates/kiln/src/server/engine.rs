@@ -675,7 +675,7 @@ impl<P: Platform> Engine<P> {
             cache_claim: Some(&claim),
             timeout_secs: self.settings.build_timeout_secs,
         };
-        let rendered = kiln_runner::render(&plan, &self.settings.runner).map_err(|e| Refusal(e))?;
+        let rendered = kiln_runner::render(&plan, &self.settings.runner).map_err(Refusal)?;
         self.store.replace_tasks(build.id, build.attempt, &rendered.tasks)?;
         let name = pod_name(build.id, build.attempt);
         self.platform.create_pod(&rendered.pod).await?;

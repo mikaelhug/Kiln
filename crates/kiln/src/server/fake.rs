@@ -196,7 +196,7 @@ impl Fake {
         let spec = serde_json::to_value(pod.spec.clone().unwrap_or_default()).unwrap_or_default();
         let containers: Vec<Value> = spec["initContainers"].as_array().cloned().unwrap_or_default();
         let created = time(unix_now());
-        let mut statuses: Vec<Value> = containers.iter().map(|c| waiting(c)).collect();
+        let mut statuses: Vec<Value> = containers.iter().map(waiting).collect();
         self.set_status(&name, json!({ "phase": "Pending", "initContainerStatuses": statuses }));
         self.emit(&name);
         tokio::time::sleep(self.pace.step).await;
@@ -564,30 +564,25 @@ impl Platform for Arc<Fake> {
             let state = state.clone();
             let key = key.clone();
             async move {
-                loop {
-                    let (log, alive) = {
-                        let guard = state.lock().expect("fake state");
-                        let log = guard.logs.get(&key).cloned().unwrap_or_default();
-                        let alive = guard.pods.get(&key.0).is_some_and(|pod| {
-                            let status =
-                                serde_json::to_value(pod.status.clone().unwrap_or_default()).unwrap_or_default();
-                            status["initContainerStatuses"].as_array().is_some_and(|all| {
-                                all.iter().any(|c| c["name"] == key.1.as_str() && c["state"].get("running").is_some())
-                            })
-                        });
-                        (log, alive)
-                    };
-                    if log.len() > sent {
-                        let chunk = log[sent..].as_bytes().to_vec();
-                        return Some((Ok(chunk), (log.len(), 0)));
-                    }
-                    if !alive && idle > 3 {
-                        return None;
-                    }
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                    let _ = idle;
-                    return Some((Ok(Vec::new()), (sent, idle + 1)));
+                let (log, alive) = {
+                    let guard = state.lock().expect("fake state");
+                    let log = guard.logs.get(&key).cloned().unwrap_or_default();
+                    let alive = guard.pods.get(&key.0).is_some_and(|pod| {
+                        let status = serde_json::to_value(pod.status.clone().unwrap_or_default()).unwrap_or_default();
+                        status["initContainerStatuses"].as_array().is_some_and(|all| {
+                            all.iter().any(|c| c["name"] == key.1.as_str() && c["state"].get("running").is_some())
+                        })
+                    });
+                    (log, alive)
+                };
+                if log.len() > sent {
+                    return Some((Ok(log.as_bytes()[sent..].to_vec()), (log.len(), 0)));
                 }
+                if !alive && idle > 3 {
+                    return None;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                Some((Ok(Vec::new()), (sent, idle + 1)))
             }
         })
         .filter(|chunk| futures::future::ready(!matches!(chunk, Ok(bytes) if bytes.is_empty())));

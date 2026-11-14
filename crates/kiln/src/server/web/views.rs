@@ -276,12 +276,14 @@ pub fn error_page(ctx: Option<&Context<'_>>, status: u16, message: &str) -> Mark
     }
 }
 
+pub type RepoSummary = (Repo, Option<Build>, Option<String>);
+
 pub struct DashboardData {
     pub repos: Vec<Repo>,
     pub active: Vec<Build>,
     pub queued: Vec<Build>,
     pub recent: Vec<Build>,
-    pub latest: Vec<(Repo, Option<Build>, Option<String>)>,
+    pub latest: Vec<RepoSummary>,
     pub slots: usize,
 }
 
@@ -317,8 +319,7 @@ pub fn dashboard_live(data: &DashboardData) -> Markup {
     let repo = |id: i64| data.repos.iter().find(|r| r.id == id);
     let enrolled_count = data.repos.iter().filter(|r| r.enrolled && r.removed_at.is_none()).count();
     let visible = data.repos.iter().filter(|r| r.removed_at.is_none()).count();
-    let enrolled: Vec<&(Repo, Option<Build>, Option<String>)> =
-        data.latest.iter().filter(|(r, _, _)| r.enrolled).collect();
+    let enrolled: Vec<&RepoSummary> = data.latest.iter().filter(|(r, _, _)| r.enrolled).collect();
     html! {
         template data-stats {
             span { (enrolled_count) " of " (visible) " repositories use Kiln" }
@@ -395,7 +396,7 @@ fn onboarding(no_repos: bool) -> Markup {
     }
 }
 
-pub fn repos(ctx: &Context<'_>, latest: &[(Repo, Option<Build>, Option<String>)]) -> Markup {
+pub fn repos(ctx: &Context<'_>, latest: &[RepoSummary]) -> Markup {
     layout(
         "Repositories",
         "repos",
@@ -416,7 +417,7 @@ pub fn repos(ctx: &Context<'_>, latest: &[(Repo, Option<Build>, Option<String>)]
     )
 }
 
-pub fn repos_live(latest: &[(Repo, Option<Build>, Option<String>)]) -> Markup {
+pub fn repos_live(latest: &[RepoSummary]) -> Markup {
     html! {
         section class="card" {
             @if latest.is_empty() {
@@ -703,17 +704,15 @@ fn banner(build: &Build) -> Markup {
 }
 
 pub fn tasks_card(data: &BuildData, selected: Option<i64>) -> Markup {
-    let mut last_phase = "";
     html! {
         section class="card" {
             @if data.tasks.is_empty() {
                 div class="empty" { p { "No tasks." } }
             }
-            @for task in &data.tasks {
+            @for (index, task) in data.tasks.iter().enumerate() {
                 @let phase = phase_group(task.kind);
-                @if phase != last_phase {
+                @if index == 0 || phase_group(data.tasks[index - 1].kind) != phase {
                     div class="phase-label" { (phase) }
-                    @let _ = { last_phase = phase; };
                 }
                 @let (class, glyph) = task_kind(task.state);
                 a class={"task" @if Some(task.ordinal) == selected { " selected" }} href={"#task-" (task.ordinal)}
