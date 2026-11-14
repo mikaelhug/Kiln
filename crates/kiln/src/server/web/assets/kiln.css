@@ -261,3 +261,17 @@ main { max-width: 1240px; margin: 0 auto; padding: 24px 20px 64px; }
 .hint { color: var(--muted); font-size: 13px; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: 14px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.2); z-index: 20; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+@media (max-width: 640px) {
+  .topbar .inner { gap: 10px; padding: 0 12px; }
+  .brand { font-size: 0; gap: 0; }
+  .brand svg { width: 24px; height: 24px; }
+  .nav a { padding: 6px 8px; font-size: 14px; }
+  .user > span:not(.live-dot), .user img { display: none; }
+  .user .button { height: 30px; padding: 0 10px; font-size: 13px; }
+  main { padding: 16px 12px 48px; }
+  .row { padding: 12px; }
+  .page-head h1 { font-size: 20px; }
+  .log-body { max-height: none; }
+  .line::before { width: 36px; padding-right: 8px; }
+}
