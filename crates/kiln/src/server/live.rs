@@ -12,7 +12,7 @@ use kube::api::{DeleteParams, ListParams, LogParams, PostParams};
 use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Api, ResourceExt};
 
-use super::platform::{Platform, PodEvent, RepoInfo};
+use super::platform::{Platform, PodEvent, PodRejected, RepoInfo};
 use super::settings::Settings;
 
 pub struct Live {
@@ -116,7 +116,8 @@ impl Platform for Live {
     }
 
     async fn file(&self, repo: &Repo, path: &str, sha: &str) -> Result<Option<String>> {
-        Ok(self.github.file(Self::installation(repo), &repo.full_name(), path, sha).await?)
+        let limit = kiln_core::config::MAX_FILE_BYTES;
+        Ok(self.github.file(Self::installation(repo), &repo.full_name(), path, sha, limit).await?)
     }
 
     async fn commit_message(&self, repo: &Repo, sha: &str) -> Result<String> {
@@ -212,6 +213,7 @@ impl Platform for Live {
         match self.pods.create(&PostParams::default(), pod).await {
             Ok(_) => Ok(()),
             Err(error) if is_status(&error, 409) => Ok(()),
+            Err(kube::Error::Api(status)) if status.code == 422 => Err(PodRejected(status.message).into()),
             Err(error) => Err(error.into()),
         }
     }
@@ -251,11 +253,43 @@ impl Platform for Live {
 
     async fn logs(&self, pod: &str, container: &str) -> Result<String> {
         let params = LogParams { container: Some(container.to_owned()), ..LogParams::default() };
-        match self.pods.logs(pod, &params).await {
-            Ok(text) => Ok(text),
-            Err(error) if is_status(&error, 404) || is_status(&error, 400) => Ok(String::new()),
-            Err(error) => Err(error.into()),
+        let mut reader = match self.pods.log_stream(pod, &params).await {
+            Ok(reader) => Box::pin(reader),
+            Err(error) if is_status(&error, 404) || is_status(&error, 400) => return Ok(String::new()),
+            Err(error) => return Err(error.into()),
+        };
+        let half = (super::logs::MAX_LOG_BYTES / 2) as usize;
+        let (mut head, mut tail, mut skipped) = (Vec::new(), Vec::new(), 0usize);
+        let mut buffer = vec![0u8; 64 * 1024];
+        loop {
+            let read = reader.read(&mut buffer).await?;
+            if read == 0 {
+                break;
+            }
+            let mut chunk = &buffer[..read];
+            if head.len() < half {
+                let take = chunk.len().min(half - head.len());
+                head.extend_from_slice(&chunk[..take]);
+                chunk = &chunk[take..];
+            }
+            tail.extend_from_slice(chunk);
+            if tail.len() > 2 * half {
+                let drop = tail.len() - half;
+                tail.drain(..drop);
+                skipped += drop;
+            }
         }
+        if tail.len() > half {
+            let drop = tail.len() - half;
+            tail.drain(..drop);
+            skipped += drop;
+        }
+        let mut text = String::from_utf8_lossy(&head).into_owned();
+        if skipped > 0 {
+            text.push_str(&format!("\n… {skipped} bytes of log omitted …\n"));
+        }
+        text.push_str(&String::from_utf8_lossy(&tail));
+        Ok(text)
     }
 
     async fn follow(&self, pod: &str, container: &str) -> Result<BoxStream<'static, Result<Vec<u8>>>> {

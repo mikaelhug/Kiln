@@ -255,14 +255,31 @@ impl Client {
         })
     }
 
-    pub async fn file(&self, installation: u64, repo: &str, path: &str, reference: &str) -> Result<Option<String>> {
+    pub async fn file(
+        &self,
+        installation: u64,
+        repo: &str,
+        path: &str,
+        reference: &str,
+        limit: usize,
+    ) -> Result<Option<String>> {
         let auth = self.installation_auth(installation).await?;
         let request = self
             .request(Method::GET, &format!("/repos/{repo}/contents/{path}"), &auth)
             .query(&[("ref", reference)])
             .header(ACCEPT, "application/vnd.github.raw+json");
         match self.send(request).await {
-            Ok(response) => Ok(Some(response.text().await?)),
+            Ok(mut response) => {
+                let mut bytes = Vec::new();
+                while let Some(chunk) = response.chunk().await? {
+                    bytes.extend_from_slice(&chunk);
+                    if bytes.len() > limit {
+                        bytes.truncate(limit + 1);
+                        break;
+                    }
+                }
+                Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+            }
             Err(error) if error.is_not_found() => Ok(None),
             Err(error) => Err(error),
         }

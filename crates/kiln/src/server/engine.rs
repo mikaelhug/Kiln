@@ -19,7 +19,7 @@ use kiln_store::{
 use tokio::sync::{Notify, mpsc};
 
 use super::logs::{Event, Logs};
-use super::platform::{Platform, PodEvent};
+use super::platform::{Platform, PodEvent, PodRejected};
 use super::settings::Settings;
 
 const PULL_GRACE_SECS: i64 = 180;
@@ -402,6 +402,9 @@ impl<P: Platform> Engine<P> {
             build.failure = Some(Failure::Config);
             build.detail = Some(render_diagnostics(&diagnostics));
         }
+        if build.config.as_ref().is_some_and(|text| text.len() > config::MAX_FILE_BYTES) {
+            build.config = None;
+        }
         let Some(id) = self.store.insert_build(&build)? else { return Ok(None) };
         if build.state.is_finished() {
             self.store.update_build(id, &BuildUpdate { finished_at: Some(now()), ..BuildUpdate::default() })?;
@@ -772,7 +775,13 @@ impl<P: Platform> Engine<P> {
         let rendered = kiln_runner::render(&plan, &self.settings.runner).map_err(Refusal::config)?;
         self.store.replace_tasks(build.id, build.attempt, &rendered.tasks)?;
         let name = pod_name(build.id, build.attempt);
-        self.platform.create_pod(&rendered.pod).await?;
+        if let Err(error) = self.platform.create_pod(&rendered.pod).await {
+            if let Some(rejected) = error.downcast_ref::<PodRejected>() {
+                self.forget_fetch_token(build.id, build.attempt).await;
+                return Err(Refusal::config(format!("Kubernetes refused the build pod: {rejected}")).into());
+            }
+            return Err(error);
+        }
         let current = self.store.build(build.id)?.context("the build disappeared")?;
         if current.state != BuildState::Starting {
             self.platform.delete_pod(&name).await?;
@@ -1233,10 +1242,10 @@ impl<P: Platform> Engine<P> {
                             Some(Ok(bytes)) => pending.extend_from_slice(&bytes),
                             _ => ended = true,
                         }
-                        let cut = if ended {
-                            pending.len()
-                        } else {
-                            pending.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1)
+                        let cut = match pending.iter().rposition(|b| *b == b'\n') {
+                            _ if ended || pending.len() >= 64 * 1024 => pending.len(),
+                            Some(index) => index + 1,
+                            None => 0,
                         };
                         if cut == 0 {
                             continue;

@@ -7,6 +7,17 @@ use kiln_registry::Promotion;
 use kiln_runner::k8s_openapi::api::core::v1::Pod;
 use kiln_store::Repo;
 
+#[derive(Debug)]
+pub struct PodRejected(pub String);
+
+impl std::fmt::Display for PodRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for PodRejected {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoInfo {
     pub id: i64,

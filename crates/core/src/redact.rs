@@ -17,7 +17,11 @@ impl Redactor {
         needles.dedup();
         let mut alternatives: Vec<String> = needles.iter().map(|needle| regex::escape(needle)).collect();
         alternatives.push(TOKEN_PATTERNS.to_owned());
-        let pattern = Regex::new(&alternatives.join("|")).expect("escaped alternation is a valid regex");
+        let pattern = regex::RegexBuilder::new(&alternatives.join("|"))
+            .size_limit(1 << 28)
+            .dfa_size_limit(1 << 26)
+            .build()
+            .expect("escaped alternation is a valid regex");
         Self { pattern }
     }
 

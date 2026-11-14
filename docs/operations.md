@@ -59,7 +59,7 @@ Pin the image by digest (`moby/buildkit:<version>-rootless` or `moby/buildkit:<v
 2. a second build reuses the cache;
 3. builds finish at your pod network MTU. Kiln runs BuildKit with `--oci-worker-net=host`, so `RUN` steps inherit the pod's MTU.
 
-**Cache storage.** Each repository gets a `ReadWriteOnce` claim `kiln-cache-<owner>-<repo>`, created on demand (`KILN_CACHE_SIZE`, `KILN_CACHE_STORAGE_CLASS`). A build only ever mounts its own repository's cache. Pull requests use a separate directory in it, so they cannot poison the default branch's cache.
+**Cache storage.** Each repository gets a `ReadWriteOnce` claim `kiln-cache-<owner>-<repo>-<hash>`, created on demand (`KILN_CACHE_SIZE`, `KILN_CACHE_STORAGE_CLASS`). A build only ever mounts its own repository's cache. Pull requests use a separate directory in it, so they cannot poison the default branch's cache.
 
 **Network.** The example policies allow build pods to reach DNS and the internet on ports 80 and 443, and nothing else. That blocks the LAN, the cluster network and the Kubernetes API.
 
@@ -73,9 +73,20 @@ The server needs the Kubernetes API, which network policies match after DNAT. Al
 - a ValidatingAdmissionPolicy that refuses build pods with a service account token, host namespaces, host paths, privileged containers or added capabilities. It allows unconfined seccomp only for the pinned `buildkitd` container;
 - the network policies, the server, its storage and its route.
 
-Copy it into your GitOps repository and replace every `example` value. Keep secrets encrypted, for example with sops.
+Copy it into your GitOps repository and replace every `example` value. Keep secrets encrypted, for example with sops. Also adapt these to your cluster:
+
+| Where | What |
+|---|---|
+| `server.yaml` | the `HTTPRoute` parent (`traefik/public`) and hostname; use an `Ingress` instead if you have no Gateway API |
+| `network-policies.yaml` | the ingress controller's namespace (`traefik`) that may reach the server, and the API server address |
+| `config.yaml` | `KILN_IMAGE` must be the same release as the server image, pinned by digest: the server and its in-pod helper speak a private protocol |
+| `build-policy.yaml` | nothing, unless you rename the build namespace |
+
+The server's egress policy allows HTTPS to public addresses only. A registry on a private address or another port needs its own egress rule.
 
 The server runs as a single replica on a `ReadWriteOncePod` volume, so two Kiln processes can never share the database.
+
+Cache claims are `ReadWriteOnce`. With node-local storage a repository's builds always land on the node that holds its cache; make sure that node can run builds, or use network-attached storage.
 
 ## 5. Onboard a repository
 
@@ -85,7 +96,7 @@ The server runs as a single replica on a `ReadWriteOncePod` volume, so two Kiln 
 
 Release candidates continue above the highest `-rc.N` already in the registry, so image automation keeps working when you switch from another CI.
 
-**Repository secrets** live in a Secret named `kiln-repo-<owner>-<repo>` (lowercase, `/` replaced by `-`) in `kiln-builds`. Reference keys from `[[images]].secrets` or a job's `secrets`. Only default-branch pushes, tags reachable from the default branch, and builds started from the UI receive them; pull requests never do.
+**Repository secrets** live in a Secret in `kiln-builds` whose exact name the repository page shows under **Pipeline**: `kiln-repo-<owner>-<repo>-<hash>`, lowercase, with every other character turned into `-` and a short hash of the full name so two repositories never share one. Reference keys from `[[images]].secrets` or a job's `secrets`. Only default-branch pushes, tags reachable from the default branch, and builds started from the UI receive them; pull requests never do.
 
 ## 6. Configuration reference
 

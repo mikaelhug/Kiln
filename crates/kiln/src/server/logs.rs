@@ -49,7 +49,16 @@ impl Logs {
         if offset >= MAX_LOG_BYTES {
             return Ok(());
         }
-        let text = self.clean(chunk);
+        let mut text = self.clean(chunk);
+        let room = (MAX_LOG_BYTES - offset) as usize;
+        if text.len() > room {
+            let mut end = room;
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            text.truncate(end);
+            text.push_str("\n… Kiln stopped recording this log at 10 MB; the downloaded log keeps the end …\n");
+        }
         file.write_all(text.as_bytes())?;
         let _ = self.events.send(Event::Log { build, attempt, task, offset, text });
         Ok(())

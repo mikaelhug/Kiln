@@ -85,3 +85,17 @@ fn retention_never_removes_active_builds() {
     let left = store.builds(&BuildFilter { limit: 10, ..Default::default() }).unwrap();
     assert_eq!(left.iter().map(|b| b.id).collect::<Vec<_>>(), vec![running]);
 }
+
+#[test]
+fn retention_keeps_each_repositorys_latest_and_latest_branch_build() {
+    let store = Store::in_memory().unwrap();
+    repo(&store, 1, "web");
+    let branch = store.insert_build(&build(1, Trigger::Push, "aaa", None, 0)).unwrap().unwrap();
+    let pull = store.insert_build(&build(1, Trigger::PullRequest, "bbb", Some(3), 0)).unwrap().unwrap();
+    for id in [branch, pull] {
+        store.update_build(id, &BuildUpdate { state: Some(BuildState::Succeeded), ..Default::default() }).unwrap();
+    }
+    assert!(store.prune(400 * 86_400, &Retention::default()).unwrap().is_empty());
+    let next = store.insert_build(&build(1, Trigger::Push, "ccc", None, 0)).unwrap().unwrap();
+    assert_eq!(store.build(next).unwrap().unwrap().number, 3, "numbering continues after pruning");
+}

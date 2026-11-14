@@ -86,7 +86,7 @@ function confirmDialog(form) {
       dialog.remove();
     });
     dialog.showModal();
-    dialog.querySelector('[value="ok"]').focus();
+    dialog.querySelector(danger ? '[value="cancel"]' : '[value="ok"]').focus();
   });
 }
 
@@ -146,6 +146,7 @@ function morph(from, to) {
 }
 
 const pending = new Map();
+const generation = new Map();
 function refresh(selector, url) {
   if (pending.has(selector)) return;
   pending.set(selector, setTimeout(async () => {
@@ -156,12 +157,16 @@ function refresh(selector, url) {
       refresh(selector, url);
       return;
     }
+    const ticket = (generation.get(selector) || 0) + 1;
+    generation.set(selector, ticket);
     try {
       const response = await fetch(url, { headers: { "X-Kiln-Fragment": "1" } });
       if (response.status === 401) { location.reload(); return; }
       if (!response.ok) return;
+      const html = await response.text();
+      if (generation.get(selector) !== ticket) return;
       const next = document.createElement("div");
-      next.innerHTML = await response.text();
+      next.innerHTML = html;
       const images = next.querySelector("template[data-images]");
       if (images) {
         images.remove();
@@ -260,7 +265,7 @@ async function loadLog(task, attempt) {
     const keep = !changed && scroller ? scroller.scrollTop : null;
     holder.innerHTML = await response.text();
     log.bytes = Number(holder.querySelector("[data-bytes]")?.dataset.bytes || 0);
-    log.lines = holder.querySelectorAll(".line").length;
+    log.lines = Number(holder.querySelector("[data-first-line]")?.dataset.firstLine || 0) + holder.querySelectorAll(".line").length;
     enhance(holder);
     const open = holder.querySelector("details[data-open-last]");
     if (open) open.open = true;
@@ -288,6 +293,55 @@ function reveal(line) {
   scroller.scrollTop = top - scroller.clientHeight / 2;
   const box = scroller.getBoundingClientRect();
   if (box.top < 60 || box.bottom > window.innerHeight) document.querySelector("#log")?.scrollIntoView({ block: "nearest" });
+}
+
+function stripAnsi(text) {
+  return text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/\x1b/g, "");
+}
+
+function ansiInto(target, text) {
+  let classes = [];
+  let last = 0;
+  const pattern = /\x1b\[([0-9;]*)([A-Za-z])/g;
+  const push = (part) => {
+    part = part.replace(/\x1b/g, "");
+    if (!part) return;
+    if (!classes.length) {
+      target.append(part);
+      return;
+    }
+    const span = document.createElement("span");
+    span.className = classes.join(" ");
+    span.textContent = part;
+    target.append(span);
+  };
+  let match;
+  while ((match = pattern.exec(text))) {
+    push(text.slice(last, match.index));
+    last = pattern.lastIndex;
+    if (match[2] !== "m") continue;
+    const parts = match[1].split(";");
+    for (let i = 0; i < parts.length; i++) {
+      const code = Number(parts[i] || 0);
+      if (code === 38 || code === 48) {
+        i += parts[i + 1] === "5" ? 2 : parts[i + 1] === "2" ? 4 : 0;
+      } else if (code === 0) {
+        classes = [];
+      } else if (code === 1) {
+        classes.push("a-b");
+      } else if (code === 2) {
+        classes.push("a-d");
+      } else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+        classes = classes.filter((c) => !c.startsWith("a-3"));
+        classes.push(`a-3${code % 10}`);
+      } else if (code === 39) {
+        classes = classes.filter((c) => !c.startsWith("a-3"));
+      } else if (code === 22) {
+        classes = classes.filter((c) => c !== "a-b" && c !== "a-d");
+      }
+    }
+  }
+  push(text.slice(last));
 }
 
 function errorLine(text) {
@@ -323,8 +377,9 @@ function appendLog(text) {
     log.lines += 1;
     const id = `task-${log.task}-L${log.lines}`;
     const line = document.createElement("div");
-    const visible = raw.slice(raw.lastIndexOf("\r") + 1);
-    line.className = visible.startsWith("$ ") ? "line cmd" : errorLine(visible) ? "line err" : "line";
+    const visible = raw.split("\r").filter(Boolean).at(-1) || "";
+    const plain = stripAnsi(visible);
+    line.className = visible.startsWith("$ ") ? "line cmd" : errorLine(plain) ? "line err" : "line";
     line.id = id;
     const number = document.createElement("a");
     number.className = "ln";
@@ -332,9 +387,9 @@ function appendLog(text) {
     number.textContent = String(log.lines);
     const content = document.createElement("span");
     content.className = "tx";
-    content.textContent = visible;
+    ansiInto(content, visible);
     line.append(number, content);
-    if (log.query && content.textContent.toLowerCase().includes(log.query)) line.classList.add("match");
+    if (log.query && plain.toLowerCase().includes(log.query)) line.classList.add("match");
     container.append(line);
   }
   if (log.query) updateHits();
@@ -581,7 +636,7 @@ setInterval(tickDurations, 1000);
 const flash = document.cookie.split("; ").find((c) => c.startsWith("kiln_flash="));
 if (flash) {
   document.cookie = "kiln_flash=; Max-Age=0; Path=/; Secure; SameSite=Strict";
-  toast(decodeURIComponent(flash.slice("kiln_flash=".length).replace(/\+/g, " ")));
+  toast(decodeURIComponent(flash.slice("kiln_flash=".length)));
 }
 if (page) connect();
 if (page === "build") {

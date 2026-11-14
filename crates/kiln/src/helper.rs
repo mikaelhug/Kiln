@@ -292,19 +292,41 @@ async fn supervise(
     Ok(code)
 }
 
+const MAX_LINE: usize = 64 * 1024;
+
 fn relay(stream: Box<dyn Read + Send>, redactor: &Redactor) {
     let mut reader = std::io::BufReader::new(stream);
     let mut line = Vec::new();
     loop {
         line.clear();
-        match reader.read_until(b'\n', &mut line) {
+        match (&mut reader).take(2 * MAX_LINE as u64).read_until(b'\n', &mut line) {
             Ok(0) | Err(_) => return,
             Ok(_) => {
+                let cut = !line.ends_with(b"\n");
+                if cut {
+                    let mut rest = Vec::new();
+                    loop {
+                        rest.clear();
+                        match (&mut reader).take(MAX_LINE as u64).read_until(b'\n', &mut rest) {
+                            Ok(0) | Err(_) => break,
+                            Ok(_) if rest.ends_with(b"\n") => break,
+                            Ok(_) => {}
+                        }
+                    }
+                }
                 let text = String::from_utf8_lossy(&line);
-                let text = text.trim_end_matches(['\n', '\r']);
+                let mut text = redactor.redact(text.trim_end_matches(['\n', '\r']));
+                if cut || text.len() > MAX_LINE {
+                    let mut end = text.len().min(MAX_LINE);
+                    while !text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    text.truncate(end);
+                    text.push_str(" … [Kiln shortened this line]");
+                }
                 let mut out = std::io::stdout().lock();
                 let guard = if text.starts_with("##kiln[") { " " } else { "" };
-                let _ = writeln!(out, "{guard}{}", redactor.redact(text));
+                let _ = writeln!(out, "{guard}{text}");
                 let _ = out.flush();
             }
         }

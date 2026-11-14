@@ -701,7 +701,9 @@ impl Store {
         let expired: Vec<i64> = {
             let mut statement = tx.prepare(
                 "SELECT id FROM builds b WHERE state IN ('succeeded', 'failed', 'cancelled', 'superseded', 'errored', 'skipped')
-                   AND (created_at < ?1 OR (SELECT COUNT(*) FROM builds n WHERE n.repo_id = b.repo_id AND n.id > b.id) >= ?2)",
+                   AND (created_at < ?1 OR (SELECT COUNT(*) FROM builds n WHERE n.repo_id = b.repo_id AND n.id > b.id) >= ?2)
+                   AND id NOT IN (SELECT MAX(id) FROM builds GROUP BY repo_id)
+                   AND id NOT IN (SELECT MAX(id) FROM builds WHERE trigger IN ('push', 'manual') GROUP BY repo_id)",
             )?;
             statement
                 .query_map(params![cutoff, retention.builds_per_repo], |row| row.get(0))?

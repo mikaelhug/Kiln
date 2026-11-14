@@ -250,6 +250,12 @@ static JOB_NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-
 static ENV_NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
 static QUANTITY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+(?:\.[0-9]+)?(?:m|Ki|Mi|Gi)?$").unwrap());
 
+pub fn is_quantity(value: &str) -> bool {
+    QUANTITY.is_match(value)
+}
+
+const RESERVED_PATHS: [&str; 6] = ["/workspace", "/kiln", "/proc", "/sys", "/dev", "/etc/resolv.conf"];
+
 fn diagnostic(path: impl Into<String>, message: impl Into<String>) -> Diagnostic {
     Diagnostic { path: path.into(), line: None, message: message.into() }
 }
@@ -341,14 +347,57 @@ fn validate_job(at: &str, job: &Job, verify: bool, images: &HashSet<&str>, out: 
             out.push(diagnostic(format!("{at}.env.{key}"), "environment names are letters, digits and underscores"));
         }
     }
+    for name in &job.secrets {
+        if !ENV_NAME.is_match(name) {
+            out.push(diagnostic(
+                format!("{at}.secrets"),
+                format!("{name:?} is not a valid secret key; use letters, digits and underscores"),
+            ));
+        }
+    }
+    let mut caches = HashSet::new();
     for path in &job.cache {
-        if matches!(path.trim_end_matches('/'), "" | ".") {
-            out.push(diagnostic(format!("{at}.cache"), "the workspace or filesystem root cannot be a cache"));
+        let trimmed = path.trim_end_matches('/');
+        let reserved = RESERVED_PATHS.iter().any(|r| trimmed == *r || trimmed.starts_with(&format!("{r}/")));
+        if matches!(trimmed, "" | ".") || reserved {
+            out.push(diagnostic(
+                format!("{at}.cache"),
+                format!("{path:?} is used by Kiln or the system and cannot be a cache"),
+            ));
+        } else if Path::new(path).components().any(|c| matches!(c, Component::ParentDir)) {
+            out.push(diagnostic(format!("{at}.cache"), format!("{path:?} must not contain ..")));
+        } else if !caches.insert(trimmed) {
+            out.push(diagnostic(format!("{at}.cache"), format!("{path:?} is listed twice")));
         }
     }
     let mut uses_candidate = false;
+    let mut service_names = HashSet::new();
     for (index, service) in job.services.iter().enumerate() {
         let here = format!("{at}.services[{index}]");
+        if !JOB_NAME.is_match(&service.name) {
+            out.push(diagnostic(format!("{here}.name"), "service names are lowercase letters, digits and dashes"));
+        } else if !service_names.insert(service.name.as_str()) {
+            out.push(diagnostic(format!("{here}.name"), format!("service {:?} is listed twice", service.name)));
+        }
+        if service.user == Some(0) {
+            out.push(diagnostic(format!("{here}.user"), "services run as a non-root user; pick a uid above 0"));
+        }
+        for key in service.env.keys() {
+            if !ENV_NAME.is_match(key) {
+                out.push(diagnostic(
+                    format!("{here}.env.{key}"),
+                    "environment names are letters, digits and underscores",
+                ));
+            }
+        }
+        for name in &service.secrets {
+            if !ENV_NAME.is_match(name) {
+                out.push(diagnostic(
+                    format!("{here}.secrets"),
+                    format!("{name:?} is not a valid secret key; use letters, digits and underscores"),
+                ));
+            }
+        }
         match (&service.image, &service.candidate) {
             (Some(_), None) => {}
             (None, Some(candidate)) => {

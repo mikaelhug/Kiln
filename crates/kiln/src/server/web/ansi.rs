@@ -10,7 +10,7 @@ pub fn line(task: i64, number: usize, raw: &str) -> Markup {
         "line"
     };
     let anchor = format!("task-{task}-L{number}");
-    html! { div class=(class) id=(anchor) { a class="ln" href={"#" (anchor)} { (number) } span class="tx" { (spans(visible)) } } }
+    html! { div class=(class) id=(anchor) { a class="ln" href={"#" (anchor)} tabindex="-1" aria-hidden="true" { (number) } span class="tx" { (spans(visible)) } } }
 }
 
 fn strip(text: &str) -> String {
@@ -68,8 +68,19 @@ fn spans(text: &str) -> Markup {
         if !current.is_empty() {
             segments.push((classes.clone(), std::mem::take(&mut current)));
         }
-        for part in code.split(';') {
+        let parts: Vec<&str> = code.split(';').collect();
+        let mut index = 0;
+        while index < parts.len() {
+            let part = parts[index];
+            index += 1;
             match part.parse::<u8>().unwrap_or(0) {
+                38 | 48 => {
+                    index += match parts.get(index) {
+                        Some(&"5") => 2,
+                        Some(&"2") => 4,
+                        _ => 0,
+                    };
+                }
                 0 => classes.clear(),
                 1 => classes.push("a-b"),
                 2 => classes.push("a-d"),
@@ -109,5 +120,7 @@ mod tests {
         assert!(rendered.contains(r#"<span class="tx"><span class="a-b a-32">✓ passed</span> &lt;script&gt;</span>"#));
         let progress = line(2, 8, "downloading 10%\rdownloading 100%").into_string();
         assert!(progress.contains("downloading 100%") && !progress.contains("10%"));
+        let truecolor = line(2, 9, "\u{1b}[38;2;255;32;0mwarm\u{1b}[0m").into_string();
+        assert!(truecolor.contains(r#"<span class="tx">warm</span>"#), "{truecolor}");
     }
 }

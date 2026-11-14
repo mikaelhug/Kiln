@@ -1615,6 +1615,7 @@ dependencies = [
  "tower-http 0.7.1",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -1669,11 +1670,13 @@ dependencies = [
 name = "kiln-runner"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "k8s-openapi",
  "kiln-core",
  "kiln-store",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

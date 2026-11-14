@@ -102,8 +102,7 @@ pub struct Rendered {
 }
 
 pub fn cache_claim_name(repo: &str) -> String {
-    let label = label_value(&repo.replace('/', "-"));
-    format!("kiln-cache-{}", &label[..label.len().min(48)])
+    crate::resource_name("kiln-cache-", repo)
 }
 
 pub fn candidate_ref(settings: &Settings, image: &str, sha: &str) -> String {
@@ -471,7 +470,7 @@ impl Builder<'_> {
         spec.cache
             .iter()
             .map(|path| {
-                let key = label_value(&path.replace('/', "-"));
+                let key = crate::resource_name("", path);
                 json!({ "name": "cache", "mountPath": absolute(path), "subPath": format!("{lane}/{job}/{key}") })
             })
             .collect()

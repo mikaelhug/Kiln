@@ -32,7 +32,7 @@ spec:
     - expression: "variables.containers.all(c, c.name != 'buildkitd' || c.image.contains('@sha256:'))"
       message: buildkitd must be pinned by digest
     - expression: "(has(object.spec.hostUsers) && object.spec.hostUsers == false) || variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.runAsUser) || c.securityContext.runAsUser != 0)"
-      message: containers may only run as uid 0 inside a user namespace
+      message: an explicit runAsUser of 0 is only allowed inside a user namespace
     - expression: "variables.containers.all(c, c.name == 'buildkitd' || c.name.startsWith('test-') || c.name.startsWith('verify-') || (has(c.securityContext) && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation == false))"
       message: Kiln's own build containers must not escalate privileges
 ---

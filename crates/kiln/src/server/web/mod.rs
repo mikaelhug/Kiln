@@ -33,7 +33,17 @@ const SESSION_COOKIE: &str = "__Host-kiln_session";
 const OAUTH_COOKIE: &str = "__Host-kiln_oauth";
 const SESSION_IDLE: i64 = 12 * 3600;
 const SESSION_MAX: i64 = 7 * 86_400;
-const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://avatars.githubusercontent.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+fn content_policy(github_web: &str) -> HeaderValue {
+    let avatars = match url::Url::parse(github_web) {
+        Ok(url) if url.host_str() == Some("github.com") => "https://avatars.githubusercontent.com".to_owned(),
+        Ok(url) => url.origin().ascii_serialization(),
+        Err(_) => "https://avatars.githubusercontent.com".to_owned(),
+    };
+    let policy = format!(
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' {avatars}; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    );
+    HeaderValue::from_str(&policy).unwrap_or_else(|_| HeaderValue::from_static("default-src 'self'"))
+}
 
 pub struct Web<P: Platform> {
     pub engine: Arc<Engine<P>>,
@@ -43,6 +53,7 @@ pub struct Web<P: Platform> {
 }
 
 pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
+    let policy = content_policy(&web.engine.settings.github_web);
     Router::new()
         .route("/", get(dashboard::<P>))
         .route("/repos", get(repos::<P>))
@@ -81,10 +92,7 @@ pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
         .route("/{owner}/{repo}/builds/{number}/cancel", post(cancel::<P>))
         .route("/{owner}/{repo}/builds/{number}/rerun", post(rerun::<P>))
         .layer(DefaultBodyLimit::max(5 * 1024 * 1024))
-        .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(CSP),
-        ))
+        .layer(SetResponseHeaderLayer::overriding(axum::http::header::CONTENT_SECURITY_POLICY, policy))
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),
@@ -207,7 +215,7 @@ fn sign_in(parts: &Parts, next: String) -> WebError {
 }
 
 fn same_origin<P: Platform>(web: &Web<P>, headers: &HeaderMap) -> WebResult<()> {
-    let expected = web.engine.settings.public_url.trim_end_matches('/');
+    let expected = web.engine.settings.public_url.as_str();
     let origin = headers.get(ORIGIN).and_then(|v| v.to_str().ok()).unwrap_or_default();
     if origin == expected {
         Ok(())
@@ -406,7 +414,8 @@ fn repo_data<P: Platform>(web: &Web<P>, repo: Repo, paging: &Paging) -> WebResul
         .filter(|b| !matches!(b.state, BuildState::Skipped | BuildState::Superseded))
         .collect();
     history.reverse();
-    Ok(views::RepoData { repo, builds, history, releases, config, more, busy, show })
+    let secret = web.engine.settings.repo_secret(&repo.full_name());
+    Ok(views::RepoData { repo, builds, history, releases, config, more, busy, show, secret })
 }
 
 async fn repo_page<P: Platform>(
@@ -429,7 +438,7 @@ async fn fragment_repo<P: Platform>(
 ) -> WebResult<Response> {
     let viewer = viewer(&user);
     let repo = web.engine.store.repo(id)?.ok_or_else(|| WebError::NotFound("repository not found".into()))?;
-    let data = repo_data(&web, repo, &Paging { before: None, ..paging })?;
+    let data = repo_data(&web, repo, &paging)?;
     Ok(render(views::repo_live(&context(&web, &viewer), &data)))
 }
 
@@ -517,7 +526,19 @@ async fn fragment_log<P: Platform>(
     let task =
         tasks.into_iter().find(|t| t.ordinal == task).ok_or_else(|| WebError::NotFound("task not found".into()))?;
     let text = web.engine.logs.read(build.id, attempt, task.ordinal, 0);
-    Ok(render(views::log_view(&build, attempt, &task, &text)))
+    const SHOWN: usize = 1024 * 1024;
+    let (skipped, shown) = if text.len() > SHOWN {
+        let mut start = text.len() - SHOWN;
+        while !text.is_char_boundary(start) {
+            start += 1;
+        }
+        let start = text[start..].find('\n').map_or(start, |i| start + i + 1);
+        let lines = text[..start].lines().filter(|line| kiln_runner::parse_marker(line).is_none()).count();
+        (Some(lines), &text[start..])
+    } else {
+        (None, text.as_str())
+    };
+    Ok(render(views::log_view(&build, attempt, &task, shown, text.len(), skipped)))
 }
 
 async fn raw_log<P: Platform>(
@@ -812,7 +833,7 @@ async fn auth_callback<P: Platform>(
             return Ok(back("github"));
         }
     };
-    let jar = jar.remove(Cookie::build(OAUTH_COOKIE).path("/"));
+    let jar = jar.remove(Cookie::build(OAUTH_COOKIE).path("/").secure(true));
     if !web.engine.settings.allowed_users.contains(&user.id) {
         web.engine.store.audit(&kiln_store::AuditEntry {
             at: unix_now(),
@@ -857,7 +878,8 @@ async fn start_session<P: Platform>(
     })?;
     let next =
         jar.get("kiln_next").map(|c| c.value().to_owned()).filter(|n| safe_next(n)).unwrap_or_else(|| "/".into());
-    let jar = jar.add(cookie(SESSION_COOKIE, token, SESSION_MAX)).remove(Cookie::build("kiln_next").path("/"));
+    let jar =
+        jar.add(cookie(SESSION_COOKIE, token, SESSION_MAX)).remove(Cookie::build("kiln_next").path("/").secure(true));
     Ok((jar, Redirect::to(&next)).into_response())
 }
 
@@ -869,7 +891,7 @@ async fn logout<P: Platform>(
 ) -> WebResult<Response> {
     same_origin(&web, &headers)?;
     web.engine.store.delete_session(&user.session)?;
-    let jar = jar.remove(Cookie::build(SESSION_COOKIE).path("/"));
+    let jar = jar.remove(Cookie::build(SESSION_COOKIE).path("/").secure(true));
     Ok((jar, Redirect::to("/login")).into_response())
 }
 

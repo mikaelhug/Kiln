@@ -793,6 +793,7 @@ pub struct RepoData {
     pub config: Option<Config>,
     pub more: Option<i64>,
     pub busy: bool,
+    pub secret: String,
 }
 
 pub fn repo(ctx: &Context<'_>, data: &RepoData) -> Markup {
@@ -987,6 +988,7 @@ pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
                                 (match config.release.mode { ReleaseMode::Rc => "Every default-branch push and tag", ReleaseMode::Tags => "Tags only" })
                                 @if config.release.shadow { span class="pill warn" { "Shadow" } }
                             }
+                            dt { "Secret" } dd { code title="Kubernetes Secret in the build namespace that holds this repository's secrets" { (data.secret) } }
                         }
                     }
                 }
@@ -1054,7 +1056,16 @@ pub fn build(ctx: &Context<'_>, data: &BuildData) -> Markup {
                 div id="tasks" class="side-col" { (sidebar(ctx, data, selected)) }
                 div class="stack" {
                     div id="log" {
-                        div class="log" { div class="log-empty" { @if data.tasks.is_empty() { (no_tasks_message(&data.build)) } @else { "Loading log…" } } }
+                        div class="log" {
+                            div class="log-empty" { @if data.tasks.is_empty() { (no_tasks_message(&data.build)) } @else { "Loading log…" } }
+                            @if !data.tasks.is_empty() {
+                                noscript {
+                                    div class="log-empty" {
+                                        @for task in &data.tasks { a href={"/builds/" (data.build.id) "/logs/" (data.attempt) "/" (task.ordinal) ".txt"} { (task_title(task)) } " " }
+                                    }
+                                }
+                            }
+                        }
                     }
                     div id="images" { @if data.images.iter().any(|i| i.digest.is_some()) { (images_card(&data.images)) } }
                 }
@@ -1116,8 +1127,9 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                 }
             }
             div class="actions" {
-                @if matches!(build.state, BuildState::Queued | BuildState::Starting | BuildState::Running) {
-                    form method="post" action={(path) "/cancel"} data-confirm="Running tasks are stopped and nothing is released." data-confirm-title={"Cancel build #" (build.number) "?"} data-confirm-action="Cancel build" data-confirm-danger {
+                @if matches!(build.state, BuildState::Queued | BuildState::Starting | BuildState::Running)
+                    || (build.state == BuildState::Releasing && data.images.iter().all(|i| i.released.is_none())) {
+                    form method="post" action={(path) "/cancel"} data-confirm=(if build.state == BuildState::Releasing { "Nothing is published." } else { "Running tasks are stopped and nothing is released." }) data-confirm-title={"Cancel build #" (build.number) "?"} data-confirm-action="Cancel build" data-confirm-danger {
                         button class="button danger" type="submit" { (icon(Icon::Stop)) "Cancel" }
                     }
                 }
@@ -1222,16 +1234,16 @@ fn pipeline(data: &BuildData) -> Markup {
         return html! {};
     }
     html! {
-        div class="pipeline" role="list" aria-label="Pipeline" {
+        nav class="pipeline" aria-label="Pipeline" {
             @for (index, stage) in stages.iter().enumerate() {
                 @if index > 0 { span class={"connector" @if stages[index - 1].state == TaskState::Passed { " done" }} {} }
                 @let class = if matches!(stage.state, TaskState::Skipped | TaskState::Cancelled) { "skip" } else { stage.class };
                 @match stage.first {
-                    Some(task) => a class={"stage " (class)} role="listitem" href={"#task-" (task)} data-task=(task) data-attempt=(data.attempt) {
+                    Some(task) => a class={"stage " (class)} href={"#task-" (task)} data-task=(task) data-attempt=(data.attempt) {
                         (task_status(stage.state, "sm"))
                         span class="what" { span class="name" { (stage.name) } span class="info" { (stage.info) } }
                     },
-                    None => div class={"stage " (class)} role="listitem" {
+                    None => div class={"stage " (class)} {
                         (task_status(stage.state, "sm"))
                         span class="what" { span class="name" { (stage.name) } span class="info" { (stage.info) } }
                     },
@@ -1379,11 +1391,11 @@ pub fn images_card(images: &[ImageRecord]) -> Markup {
     }
 }
 
-pub fn log_view(build: &Build, attempt: i64, task: &Task, text: &str) -> Markup {
+pub fn log_view(build: &Build, attempt: i64, task: &Task, text: &str, bytes: usize, skipped: Option<usize>) -> Markup {
     let raw = format!("/builds/{}/logs/{attempt}/{}.txt", build.id, task.ordinal);
     html! {
         div class="log" {
-            div class="log-head" data-bytes=(text.len()) data-state=(task.state.as_str()) {
+            div class="log-head" data-bytes=(bytes) data-first-line=(skipped.unwrap_or(0)) data-state=(task.state.as_str()) {
                 div class="name" { (task_status(task.state, "sm")) span { (task_title(task)) } }
                 span class="meta" {
                     (elapsed(task.started_at, task.finished_at))
@@ -1403,17 +1415,20 @@ pub fn log_view(build: &Build, attempt: i64, task: &Task, text: &str) -> Markup 
                 }
             }
             div class="log-body" data-task=(task.ordinal) {
+                @if let Some(lines) = skipped {
+                    div class="log-empty" { (lines) " earlier lines are not shown. " a href=(raw) download { "Download the full log" } }
+                }
                 @if text.trim().is_empty() {
                     div class="log-empty" { @if task.state == TaskState::Pending { "This task has not started yet." } @else if task.state == TaskState::Skipped { "Skipped because an earlier task failed." } @else if task.state == TaskState::Running { "Waiting for output…" } @else { "No output." } }
                 } @else {
-                    (render_log(task, text))
+                    (render_log(task, text, skipped.unwrap_or(0)))
                 }
             }
         }
     }
 }
 
-fn render_log(task: &Task, text: &str) -> Markup {
+fn render_log(task: &Task, text: &str, first: usize) -> Markup {
     let mut preamble = Vec::new();
     let mut sections: Vec<(usize, Vec<&str>)> = Vec::new();
     for line in text.lines() {
@@ -1426,7 +1441,7 @@ fn render_log(task: &Task, text: &str) -> Markup {
             },
         }
     }
-    let mut number = 0;
+    let mut number = first;
     let mut numbered = |lines: &[&str]| -> Markup {
         html! { div class="lines" { @for line in lines { (ansi::line(task.ordinal, { number += 1; number }, line)) } } }
     };

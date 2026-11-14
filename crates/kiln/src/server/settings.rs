@@ -62,6 +62,32 @@ fn number<T: std::str::FromStr>(name: &str, default: T) -> Result<T> {
     }
 }
 
+fn origin(name: &str, value: &str) -> Result<String> {
+    let url = url::Url::parse(value)
+        .with_context(|| format!("{name} must be a URL like https://kiln.example.com, got {value:?}"))?;
+    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1"));
+    if url.scheme() != "https" && !(url.scheme() == "http" && local) {
+        bail!("{name} must use https, got {value:?}");
+    }
+    if !matches!(url.path(), "" | "/") || url.query().is_some() || url.fragment().is_some() {
+        bail!("{name} must be an origin without a path, like https://kiln.example.com, got {value:?}");
+    }
+    Ok(url.origin().ascii_serialization())
+}
+
+fn quantity(name: &str, default: &str) -> Result<String> {
+    let value = var(name).unwrap_or_else(|| default.to_owned());
+    let number = value.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    let suffix = &value[number.len()..];
+    let valid = !number.is_empty()
+        && number.parse::<f64>().is_ok_and(|n| n > 0.0)
+        && ["", "m", "k", "M", "G", "T", "Ki", "Mi", "Gi", "Ti"].contains(&suffix);
+    if !valid {
+        bail!("{name} must be a Kubernetes quantity like 2Gi or 500m, got {value:?}");
+    }
+    Ok(value)
+}
+
 fn labels(name: &str) -> Result<BTreeMap<String, String>> {
     list(name)
         .into_iter()
@@ -75,11 +101,11 @@ fn labels(name: &str) -> Result<BTreeMap<String, String>> {
 
 impl Settings {
     pub fn from_env() -> Result<Self> {
-        let public_url = required("KILN_PUBLIC_URL")?.trim_end_matches('/').to_owned();
-        if !public_url.starts_with("https://") && !public_url.starts_with("http://localhost") {
-            bail!("KILN_PUBLIC_URL must be https (got {public_url})");
-        }
+        let public_url = origin("KILN_PUBLIC_URL", &required("KILN_PUBLIC_URL")?)?;
         let registry = required("KILN_REGISTRY")?.trim_end_matches('/').to_owned();
+        if registry.contains("://") || !registry.contains('/') {
+            bail!("KILN_REGISTRY is a registry and namespace without a scheme, like ghcr.io/example; got {registry:?}");
+        }
         let registry_host = registry.split('/').next().unwrap_or_default().to_owned();
         let github_api = var("KILN_GITHUB_API").unwrap_or_else(|| "https://api.github.com".into());
         let allowed_users = list("KILN_ALLOWED_USER_IDS")
@@ -94,8 +120,8 @@ impl Settings {
             bail!("KILN_OWNERS must list the GitHub accounts whose repositories Kiln builds");
         }
         let mut webhook_secrets = vec![secret("KILN_WEBHOOK_SECRET")?];
-        if let Ok(previous) = secret("KILN_WEBHOOK_SECRET_PREVIOUS") {
-            webhook_secrets.push(previous);
+        if var("KILN_WEBHOOK_SECRET_PREVIOUS").is_some() || var("KILN_WEBHOOK_SECRET_PREVIOUS_FILE").is_some() {
+            webhook_secrets.push(secret("KILN_WEBHOOK_SECRET_PREVIOUS")?);
         }
         let runner = kiln_runner::Settings {
             namespace: var("KILN_BUILD_NAMESPACE").unwrap_or_else(|| "kiln-builds".into()),
@@ -112,11 +138,11 @@ impl Settings {
             user_namespaces: var("KILN_USER_NAMESPACES").is_none_or(|v| v != "false"),
             avoid_labels: labels("KILN_AVOID_POD_LABELS")?,
             avoid_namespace: var("KILN_AVOID_POD_NAMESPACE"),
-            workspace_size: var("KILN_WORKSPACE_SIZE").unwrap_or_else(|| "8Gi".into()),
-            output_size: var("KILN_OUTPUT_SIZE").unwrap_or_else(|| "10Gi".into()),
-            default_cpu: var("KILN_DEFAULT_CPU").unwrap_or_else(|| "1".into()),
-            default_memory: var("KILN_DEFAULT_MEMORY").unwrap_or_else(|| "2Gi".into()),
-            memory_limit_factor: number("KILN_MEMORY_LIMIT_FACTOR", 2)?,
+            workspace_size: quantity("KILN_WORKSPACE_SIZE", "8Gi")?,
+            output_size: quantity("KILN_OUTPUT_SIZE", "10Gi")?,
+            default_cpu: quantity("KILN_DEFAULT_CPU", "1")?,
+            default_memory: quantity("KILN_DEFAULT_MEMORY", "2Gi")?,
+            memory_limit_factor: number("KILN_MEMORY_LIMIT_FACTOR", 2)?.max(1),
         };
         if !runner.buildkit_rootless && !runner.user_namespaces {
             bail!(
@@ -149,7 +175,7 @@ impl Settings {
             release_window_secs: number("KILN_RELEASE_WINDOW_SECONDS", 1800)?.clamp(0, 86_400),
             repo_secret_prefix: var("KILN_REPO_SECRET_PREFIX").unwrap_or_else(|| "kiln-repo-".into()),
             cache_class: var("KILN_CACHE_STORAGE_CLASS"),
-            cache_size: var("KILN_CACHE_SIZE").unwrap_or_else(|| "20Gi".into()),
+            cache_size: quantity("KILN_CACHE_SIZE", "20Gi")?,
             runner,
         })
     }
@@ -200,6 +226,6 @@ impl Settings {
     }
 
     pub fn repo_secret(&self, repo: &str) -> String {
-        format!("{}{}", self.repo_secret_prefix, kiln_runner::label_value(&repo.replace('/', "-")))
+        kiln_runner::resource_name(&self.repo_secret_prefix, repo)
     }
 }
