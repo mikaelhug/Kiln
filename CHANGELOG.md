@@ -4,9 +4,9 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
-## 0.1.0
+## 0.1.1
 
-The first public release.
+The first public release. Version 0.1.0 was tagged but never published.
 
 - Builds private GitHub repositories that commit a `.kiln.toml`: tests on pull requests, image builds with BuildKit on default-branch pushes and `v*` tags, smoke tests against the built image, and semver releases to an OCI registry.
 - One Kubernetes pod per build with a rootless or user-namespaced BuildKit sidecar, per-repository caches, network policies and an admission policy.

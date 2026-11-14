@@ -47,7 +47,7 @@ spec:
                     operator: DoesNotExist
       containers:
         - name: kiln
-          image: ghcr.io/mikaelhug/kiln:0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: ghcr.io/mikaelhug/kiln:0.1.1@sha256:0000000000000000000000000000000000000000000000000000000000000000
           args: [serve]
           ports:
             - name: http

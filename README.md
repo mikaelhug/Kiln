@@ -41,7 +41,7 @@ Every build goes through **test → build → verify → release**. Pull request
 ## Try it in a minute
 
 ```bash
-docker run --rm -p 8080:8080 ghcr.io/mikaelhug/kiln:0.1.0 demo --bind 0.0.0.0
+docker run --rm -p 8080:8080 ghcr.io/mikaelhug/kiln:0.1.1 demo --bind 0.0.0.0
 ```
 
 Open <http://localhost:8080> and choose **Enter the demo**. The demo runs the real engine and UI against simulated repositories with a few days of history; nothing outside your machine is contacted. With Rust installed, `cargo run -p kiln -- demo` does the same from a checkout.
