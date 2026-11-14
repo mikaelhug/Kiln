@@ -25,10 +25,13 @@ anyhow = "1.0.104"
 axum = "0.8.9"
 base64 = "0.23.1"
 clap = { version = "4.6.7", features = ["derive"] }
+flate2 = "1.1.11"
+futures = "0.3.34"
 hex = "0.4.3"
 indexmap = { version = "2.14.2", features = ["serde"] }
 jsonwebtoken = { version = "12.0.0", default-features = false, features = ["rust_crypto", "use_pem"] }
 k8s-openapi = { version = "0.29.0", features = ["latest"] }
+nix = { version = "0.31.3", features = ["signal", "process"] }
 rand = "0.10.3"
 regex = "1.13.1"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "gzip", "query", "form", "stream"] }
@@ -38,11 +41,14 @@ semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
+tar = "0.4.46"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["sync", "time"] }
 tokio-util = { version = "0.7.20", features = ["io"] }
 toml = { version = "1.2.1", features = ["preserve_order"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
 url = "2.5.8"
 
 [profile.release]

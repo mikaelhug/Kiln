@@ -191,10 +191,11 @@ impl Builder<'_> {
         for (key, value) in &job.env {
             env.push(json!({ "name": key, "value": value }));
         }
-        if self.plan.trusted {
+        if self.plan.trusted && !job.secrets.is_empty() {
             for key in &job.secrets {
                 env.push(self.secret_env(key, key)?);
             }
+            env.push(json!({ "name": "KILN_SECRET_NAMES", "value": job.secrets.join(",") }));
         }
         if phase == "verify" {
             for image in &self.plan.config.images {
@@ -387,6 +388,7 @@ impl Builder<'_> {
             }
             let mut mounts = vec![
                 json!({ "name": "workspace", "mountPath": WORKSPACE, "readOnly": true }),
+                json!({ "name": "kiln-bin", "mountPath": KILN_BIN, "readOnly": true }),
                 json!({ "name": "buildkit-run", "mountPath": BUILDKIT_SOCKET }),
                 json!({ "name": "out", "mountPath": OUT }),
             ];
@@ -402,10 +404,15 @@ impl Builder<'_> {
                 }
             }
             args.push(format!("--output=type=oci,dest={OUT}/{index},tar=false"));
+            let mut command = vec![format!("{KILN_BIN}/kiln"), "helper".into(), "exec".into()];
+            if !image.secrets.is_empty() {
+                command.push("--redact-dir=/kiln/secrets".into());
+            }
+            command.extend(["--".into(), "buildctl".into()]);
             self.init.push(json!({
                 "name": container,
                 "image": self.settings.buildkit_image,
-                "command": ["buildctl"],
+                "command": command,
                 "args": args,
                 "volumeMounts": mounts,
                 "resources": { "requests": { "cpu": "100m", "memory": "128Mi" }, "limits": { "memory": "512Mi" } },
