@@ -4,6 +4,10 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+## 0.1.2
+
+- Kiln starts without a GitHub App and shows a Connect GitHub page until `KILN_APP_ID` is set, so it can be deployed before the app exists.
+
 ## 0.1.1
 
 The first public release. Version 0.1.0 was tagged but never published.

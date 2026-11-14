@@ -100,6 +100,18 @@ fn labels(name: &str) -> Result<BTreeMap<String, String>> {
 }
 
 impl Settings {
+    pub fn github_configured() -> bool {
+        var("KILN_APP_ID").is_some()
+    }
+
+    pub fn listen() -> Result<SocketAddr> {
+        var("KILN_LISTEN").unwrap_or_else(|| "0.0.0.0:8080".into()).parse().context("KILN_LISTEN")
+    }
+
+    pub fn public_url() -> Option<String> {
+        var("KILN_PUBLIC_URL").and_then(|value| origin("KILN_PUBLIC_URL", &value).ok())
+    }
+
     pub fn from_env() -> Result<Self> {
         let public_url = origin("KILN_PUBLIC_URL", &required("KILN_PUBLIC_URL")?)?;
         let registry = required("KILN_REGISTRY")?.trim_end_matches('/').to_owned();
@@ -150,7 +162,7 @@ impl Settings {
             );
         }
         Ok(Self {
-            listen: var("KILN_LISTEN").unwrap_or_else(|| "0.0.0.0:8080".into()).parse().context("KILN_LISTEN")?,
+            listen: Self::listen()?,
             public_url,
             data_dir: PathBuf::from(var("KILN_DATA_DIR").unwrap_or_else(|| "/data".into())),
             github_web: var("KILN_GITHUB_WEB").unwrap_or_else(|| "https://github.com".into()),

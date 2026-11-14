@@ -117,7 +117,7 @@ Copy it into your GitOps repository, replace `secrets.yaml` with the file `kiln 
 | `network-policies.yaml` | the namespace of your ingress controller (`traefik`) that may reach the server, and the API server addresses |
 | `build-policy.yaml` | the ResourceQuota: at least `KILN_SLOTS` times the requests of your largest build. Every test and verify job and `buildkitd` requests `KILN_DEFAULT_CPU` and `KILN_DEFAULT_MEMORY` unless a job sets its own |
 
-**The image.** Use the same release for the server image in `server.yaml` and for `KILN_IMAGE`, pinned by the digest from the release notes, for example `ghcr.io/mikaelhug/kiln:0.1.1@sha256:…`. The server and its in-pod helper speak a private protocol, so they must always match; upgrade both together.
+**The image.** Use the same release for the server image in `server.yaml` and for `KILN_IMAGE`, pinned by the digest from the release notes, for example `ghcr.io/mikaelhug/kiln:0.1.2@sha256:…`. The server and its in-pod helper speak a private protocol, so they must always match; upgrade both together.
 
 Encrypt `secrets.yaml` before committing it, for example with sops, and let your GitOps tool decrypt it. Without GitOps:
 
@@ -126,6 +126,8 @@ kubectl apply -k deploy/kubernetes
 ```
 
 The server runs as a single replica on a `ReadWriteOncePod` volume, so two Kiln processes can never share the database. When it is up, sign in at your public URL with a GitHub account listed in `KILN_ALLOWED_USER_IDS`.
+
+You can also deploy before creating the GitHub App: without `KILN_APP_ID`, Kiln serves a **Connect GitHub** page and builds nothing. Add the app's values and the secrets later; Kiln starts building after its next restart.
 
 ## 5. Onboard a repository
 
@@ -208,7 +210,7 @@ Kiln writes a copy of its database to `kiln.backup.db` in the data directory eve
 ## 8. Try it without a cluster
 
 ```bash
-docker run --rm -p 8080:8080 ghcr.io/mikaelhug/kiln:0.1.1 demo --bind 0.0.0.0
+docker run --rm -p 8080:8080 ghcr.io/mikaelhug/kiln:0.1.2 demo --bind 0.0.0.0
 ```
 
 The demo runs the real engine and UI against simulated repositories, builds and logs. It starts with a few days of build history and pushes a new commit every minute or so. Nothing outside your machine is contacted.

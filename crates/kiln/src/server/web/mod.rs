@@ -55,6 +55,29 @@ pub struct Web<P: Platform> {
     pub deliveries: std::sync::Mutex<std::collections::VecDeque<String>>,
 }
 
+pub fn unconnected(public_url: Option<String>) -> Router {
+    let page = views::unconnected(public_url.as_deref()).into_string();
+    Router::new()
+        .route("/healthz", get(|| async { "ok" }))
+        .route("/readyz", get(|| async { "ok" }))
+        .route("/assets/kiln.css", get(|| async { asset("text/css; charset=utf-8", include_str!("assets/kiln.css")) }))
+        .route("/assets/favicon.svg", get(|| async { asset("image/svg+xml", include_str!("assets/favicon.svg")) }))
+        .fallback(get(move || {
+            let page = page.clone();
+            async move { ([(CACHE_CONTROL, "no-store")], maud::PreEscaped(page)) }
+        }))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+            ),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+}
+
 pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
     let policy = content_policy(&web.engine.settings.github_web);
     Router::new()

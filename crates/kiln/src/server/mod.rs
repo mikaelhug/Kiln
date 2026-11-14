@@ -32,6 +32,14 @@ pub async fn serve() -> Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,kube=warn".into()),
         )
         .init();
+    if !Settings::github_configured() {
+        let listen = Settings::listen()?;
+        let app = web::unconnected(Settings::public_url()).layer(tower_http::trace::TraceLayer::new_for_http());
+        let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listening on {listen}"))?;
+        tracing::warn!(%listen, "no GitHub App is configured; serving the connect page until KILN_APP_ID is set");
+        axum::serve(listener, app).with_graceful_shutdown(shutdown()).await?;
+        return Ok(());
+    }
     let settings = Arc::new(Settings::from_env()?);
     std::fs::create_dir_all(&settings.data_dir).with_context(|| format!("creating {}", settings.data_dir.display()))?;
     let store = Arc::new(Store::open(&settings.data_dir.join("kiln.db"))?);

@@ -384,6 +384,34 @@ pub fn login(error: Option<&str>, demo: bool) -> Markup {
     }
 }
 
+pub fn unconnected(public_url: Option<&str>) -> Markup {
+    let url = public_url.unwrap_or("https://kiln.example.com");
+    html! {
+        (DOCTYPE)
+        html lang="en" {
+            head {
+                meta charset="utf-8";
+                meta name="viewport" content="width=device-width, initial-scale=1";
+                meta name="color-scheme" content="light dark";
+                title { "Connect GitHub · Kiln" }
+                link rel="icon" href="/assets/favicon.svg" type="image/svg+xml";
+                link rel="stylesheet" href={"/assets/kiln.css?v=" (*ASSET_VERSION)};
+            }
+            body {
+                div class="auth" {
+                    div class="card auth-card" {
+                        span class="mark" { (PreEscaped(LOGO)) }
+                        h1 { "Connect GitHub" }
+                        p { "Kiln is running without a GitHub App." }
+                        pre class="command" { "kiln setup --url " (url) }
+                        a class="button" href="https://github.com/mikaelhug/kiln/blob/main/docs/operations.md#1-create-the-github-app" { (PreEscaped(GITHUB)) "Setup guide" }
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub fn error_page(ctx: Option<&Context<'_>>, status: u16, message: &str) -> Markup {
     let title = match status {
         404 => "Not found",
