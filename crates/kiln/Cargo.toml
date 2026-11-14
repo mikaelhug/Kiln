@@ -10,9 +10,13 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+axum = { workspace = true, features = ["macros"] }
+axum-extra.workspace = true
 clap.workspace = true
 flate2.workspace = true
 futures.workspace = true
+hex.workspace = true
+hmac.workspace = true
 k8s-openapi.workspace = true
 kiln-core.workspace = true
 kiln-github.workspace = true
@@ -20,13 +24,18 @@ kiln-registry.workspace = true
 kiln-runner.workspace = true
 kiln-store.workspace = true
 kube.workspace = true
+maud.workspace = true
 nix.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_urlencoded.workspace = true
+sha2.workspace = true
 tar.workspace = true
+time.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
+tower-http.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
 

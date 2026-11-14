@@ -830,6 +830,7 @@ impl<P: Platform> Engine<P> {
             Outcome::Infra { detail } => self.retry_or_error(&build, &name, detail).await,
             Outcome::Failed { failure, detail } => {
                 self.finalize_all_logs(&build, attempt, &name).await?;
+                let detail = self.explain(&build, attempt, failure).unwrap_or(detail);
                 self.skip_pending(&build, attempt)?;
                 self.finish(build.id, BuildState::Failed, Some(failure), Some(detail))?;
                 self.platform.delete_pod(&name).await?;
@@ -848,6 +849,26 @@ impl<P: Platform> Engine<P> {
                 Ok(())
             }
         }
+    }
+
+    fn explain(&self, build: &Build, attempt: i64, failure: Failure) -> Option<String> {
+        if !matches!(failure, Failure::Step | Failure::Timeout | Failure::OutOfMemory) {
+            return None;
+        }
+        let tasks = self.store.tasks(build.id, attempt).ok()?;
+        let task = tasks.iter().find(|t| matches!(t.state, TaskState::Failed | TaskState::TimedOut))?;
+        let job = match task.kind {
+            TaskKind::Test => format!("test job {}", task.name),
+            TaskKind::Verify => format!("verify job {}", task.name),
+            _ => return None,
+        };
+        let step = task.steps.iter().find(|s| matches!(s.state, TaskState::Failed | TaskState::TimedOut))?;
+        Some(match (failure, step.exit_code) {
+            (Failure::OutOfMemory, _) => format!("“{}” ran out of memory in {job}; raise resources.memory", step.name),
+            (_, Some(124)) => format!("“{}” timed out in {job}", step.name),
+            (_, Some(code)) => format!("“{}” failed in {job} (exit code {code})", step.name),
+            (_, None) => format!("“{}” failed in {job}", step.name),
+        })
     }
 
     fn unexpected_exits(&self, build: &Build, exits: &[(String, i32)]) -> Result<Option<String>> {

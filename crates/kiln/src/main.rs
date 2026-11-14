@@ -39,6 +39,13 @@ enum Commands {
     },
     #[command(about = "Print the JSON Schema for .kiln.toml")]
     Schema,
+    #[command(about = "Run the Kiln server")]
+    Serve,
+    #[command(about = "Try Kiln locally with simulated repositories, builds and logs")]
+    Demo {
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+    },
     #[command(hide = true, subcommand)]
     Helper(helper::Helper),
 }
@@ -49,6 +56,8 @@ async fn main() -> ExitCode {
         Commands::Validate { file, repo, json } => cli::validate(&file, repo, json),
         Commands::Plan { event, published, file, repo } => cli::plan(&file, repo, &event, &published),
         Commands::Schema => cli::schema(),
+        Commands::Serve => server::serve().await.map(|()| ExitCode::SUCCESS),
+        Commands::Demo { port } => server::demo(port).await.map(|()| ExitCode::SUCCESS),
         Commands::Helper(command) => helper::run(command).await,
     };
     match result {

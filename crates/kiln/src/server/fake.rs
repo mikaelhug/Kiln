@@ -22,6 +22,7 @@ pub struct Pace {
 }
 
 impl Pace {
+    #[cfg(test)]
     pub fn instant() -> Self {
         Self { step: Duration::from_millis(5), line: Duration::ZERO }
     }
@@ -119,14 +120,17 @@ impl Fake {
         self.state().failing.insert(container.into());
     }
 
+    #[cfg(test)]
     pub fn lose_next_pod(&self, container: &str) {
         self.state().lost.insert(container.into());
     }
 
+    #[cfg(test)]
     pub fn registry_tag(&self, repository: &str, tag: &str) -> Option<String> {
         self.state().registry.get(repository).and_then(|tags| tags.get(tag).cloned())
     }
 
+    #[cfg(test)]
     pub fn checks(&self) -> Vec<CheckRun> {
         let state = self.state();
         let mut checks: Vec<(i64, CheckRun)> = state.checks.iter().map(|(k, v)| (*k, v.clone())).collect();
@@ -134,6 +138,7 @@ impl Fake {
         checks.into_iter().map(|(_, c)| c).collect()
     }
 
+    #[cfg(test)]
     pub fn pod_names(&self) -> Vec<String> {
         self.state().pods.keys().cloned().collect()
     }
@@ -142,6 +147,7 @@ impl Fake {
         self.state().pods.get(name).cloned()
     }
 
+    #[cfg(test)]
     pub fn revoked(&self) -> usize {
         self.state().revoked.len()
     }
@@ -246,7 +252,7 @@ impl Fake {
 
     async fn run_container(&self, pod: &str, container: &Value) -> i32 {
         let name = container["name"].as_str().unwrap_or_default().to_owned();
-        let fails = self.state().failing.contains(&name);
+        let fails = self.state().failing.remove(&name);
         let args: Vec<String> = container["args"]
             .as_array()
             .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
