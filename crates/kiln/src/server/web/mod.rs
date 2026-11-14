@@ -210,7 +210,7 @@ fn viewer(user: &User) -> Viewer {
 }
 
 fn flash(path: &str, message: &str) -> Response {
-    let mut note = Cookie::new("kiln_flash", urlencode(message));
+    let mut note = Cookie::new("kiln_flash", message.to_owned());
     note.set_path("/");
     note.set_secure(true);
     note.set_same_site(SameSite::Strict);
