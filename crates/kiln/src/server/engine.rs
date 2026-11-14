@@ -1099,10 +1099,11 @@ impl<P: Platform> Engine<P> {
                     let mut offset = 0i64;
                     while let Some(chunk) = stream.next().await {
                         let Ok(bytes) = chunk else { break };
-                        if engine.finalized.lock().expect("finalized").contains(&(build_id, attempt, ordinal)) {
+                        let text = String::from_utf8_lossy(&bytes).into_owned();
+                        let finalized = engine.finalized.lock().expect("finalized");
+                        if finalized.contains(&(build_id, attempt, ordinal)) {
                             break;
                         }
-                        let text = String::from_utf8_lossy(&bytes).into_owned();
                         for line in text.lines() {
                             if let Some(marker) = parse_marker(line) {
                                 engine.apply_marker(build_id, attempt, ordinal, kind, &marker, offset);
@@ -1112,6 +1113,7 @@ impl<P: Platform> Engine<P> {
                         if let Err(error) = engine.logs.append(build_id, attempt, ordinal, &text) {
                             tracing::warn!(%error, "writing a live log failed");
                         }
+                        drop(finalized);
                     }
                 }
                 Err(error) => tracing::debug!(%error, pod, container, "following the log failed"),
@@ -1162,7 +1164,7 @@ impl<P: Platform> Engine<P> {
     }
 
     async fn finalize_log(&self, build: &Build, attempt: i64, task: &Task, pod: &str) -> Result<()> {
-        if !self.finalized.lock().expect("finalized").insert((build.id, attempt, task.ordinal)) {
+        if self.finalized.lock().expect("finalized").contains(&(build.id, attempt, task.ordinal)) {
             return Ok(());
         }
         let text = self.platform.logs(pod, &task.container).await.unwrap_or_default();
@@ -1173,7 +1175,13 @@ impl<P: Platform> Engine<P> {
             }
             offset += line.len() as i64;
         }
-        let bytes = self.logs.replace(build.id, attempt, task.ordinal, &text)?;
+        let bytes = {
+            let mut finalized = self.finalized.lock().expect("finalized");
+            if !finalized.insert((build.id, attempt, task.ordinal)) {
+                return Ok(());
+            }
+            self.logs.replace(build.id, attempt, task.ordinal, &text)?
+        };
         self.store.update_task(
             build.id,
             attempt,
