@@ -78,7 +78,8 @@ jobs:
       - name: Package
         run: |
           mkdir -p out
-          tar -C dist -czf "out/kiln-${{ needs.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz" kiln
+          cp LICENSE-MIT LICENSE-APACHE README.md dist/
+          tar -C dist -czf "out/kiln-${{ needs.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz" kiln LICENSE-MIT LICENSE-APACHE README.md
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             echo "${{ steps.build.outputs.digest }}" > "out/digest-${{ matrix.arch }}"
           fi
@@ -98,8 +99,9 @@ jobs:
       - run: cargo build --release --locked -p kiln
       - name: Package
         run: |
-          mkdir -p out
-          tar -C target/release -czf "out/kiln-${{ needs.version.outputs.version }}-macos-arm64.tar.gz" kiln
+          mkdir -p out dist
+          cp target/release/kiln LICENSE-MIT LICENSE-APACHE README.md dist/
+          tar -C dist -czf "out/kiln-${{ needs.version.outputs.version }}-macos-arm64.tar.gz" kiln LICENSE-MIT LICENSE-APACHE README.md
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: macos-arm64

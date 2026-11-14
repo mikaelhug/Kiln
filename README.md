@@ -93,3 +93,7 @@ Kiln is young. It runs real workloads, but expect rough edges, and read the [sec
 ## Contributing
 
 Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). `just check` runs formatting, clippy, the no-comments rule, the tests and the schema drift check.
+
+## License
+
+Kiln is dual-licensed under the [MIT License](LICENSE-MIT) or the [Apache License 2.0](LICENSE-APACHE), at your option. Unless you state otherwise, any contribution you submit is licensed the same way, without additional terms.
