@@ -41,4 +41,5 @@ Pull-request pods only fetch and test. A tag on a commit that was already built 
   - user namespaces where available
   - a validating admission policy that confines the one unconfined-seccomp container to the pinned BuildKit image
 - The UI uses GitHub OAuth, allowlisted by numeric user id, with server-side sessions, origin-checked POSTs and a strict CSP.
+- Every hour Kiln compares the registry's semver tags with the versions it released and flags any it did not publish. The first scan of an image only records what is already there.
 - Kiln never builds itself. Its own image comes from GitHub-hosted Actions on this public repository.

@@ -125,6 +125,7 @@ Values marked *file* can also be given as `<NAME>_FILE` pointing at a mounted se
 | Rotate the webhook secret | Set the new value and keep the old one in `KILN_WEBHOOK_SECRET_PREVIOUS` until GitHub uses the new one. |
 | Rotate the App key or the client secret | GitHub allows two at a time: add the new one, deploy, then delete the old one. |
 | Stop all builds for a repository | **Pause** on the repository page. |
+| A repository shows "Published outside Kiln" | Every hour Kiln compares the registry's semver tags with what it released. Another CI still publishing, or someone using the registry credential, shows up here. Find the source, then **Dismiss**. |
 
 Kiln writes a copy of its database to `kiln.backup.db` in the data directory every hour.
 
