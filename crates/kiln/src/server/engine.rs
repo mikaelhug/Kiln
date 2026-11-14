@@ -653,8 +653,11 @@ impl<P: Platform> Engine<P> {
         let version = if pull_request { None } else { self.allocate(&repo, build, &config).await? };
         let token = self.platform.fetch_token(&repo).await.context("minting the fetch token")?;
         let secret = format!("{}-fetch", pod_name(build.id, build.attempt));
-        self.platform.create_secret(&secret, build.id, "token", &token.token).await?;
-        self.fetch_tokens.lock().expect("fetch tokens").insert(build.id, token.token);
+        self.fetch_tokens.lock().expect("fetch tokens").insert(build.id, token.token.clone());
+        if let Err(error) = self.platform.create_secret(&secret, build.id, "token", &token.token).await {
+            self.forget_fetch_token(build.id, build.attempt).await;
+            return Err(error);
+        }
         let claim = cache_claim_name(&repo.full_name());
         self.platform.ensure_cache(&claim).await?;
         let repo_secret = self.settings.repo_secret(&repo.full_name());
@@ -678,7 +681,10 @@ impl<P: Platform> Engine<P> {
         let rendered = kiln_runner::render(&plan, &self.settings.runner).map_err(Refusal)?;
         self.store.replace_tasks(build.id, build.attempt, &rendered.tasks)?;
         let name = pod_name(build.id, build.attempt);
-        self.platform.create_pod(&rendered.pod).await?;
+        if let Err(error) = self.platform.create_pod(&rendered.pod).await {
+            self.forget_fetch_token(build.id, build.attempt).await;
+            return Err(error);
+        }
         self.update(
             build.id,
             BuildUpdate {
@@ -1271,11 +1277,12 @@ impl<P: Platform> Engine<P> {
         }
         let backup = self.settings.data_dir.join("kiln.backup.db");
         self.store.backup(&backup)?;
-        for (secret, build) in self.platform.build_secrets().await? {
-            let finished =
-                self.store.build(build)?.is_none_or(|b| b.state.is_finished() || b.state == BuildState::Queued);
-            if finished {
-                self.platform.delete_secret(&secret).await?;
+        let recent = self.store.builds(&BuildFilter { limit: 200, ..Default::default() })?;
+        for build in
+            recent.iter().filter(|b| b.state.is_finished() && b.finished_at.is_some_and(|t| now() - t < 2 * 86_400))
+        {
+            for attempt in 1..=build.attempt {
+                self.platform.delete_secret(&format!("{}-fetch", pod_name(build.id, attempt))).await?;
             }
         }
         for pod in self.platform.pods().await? {

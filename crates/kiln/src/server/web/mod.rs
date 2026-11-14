@@ -551,7 +551,20 @@ async fn system<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebR
         ("Attempts", settings.max_attempts.to_string()),
         ("User namespaces", if settings.runner.user_namespaces { "on".into() } else { "off".into() }),
     ];
-    let audit = web.engine.store.audit_log(100)?;
+    let store = &web.engine.store;
+    let mut audit = Vec::new();
+    for entry in store.audit_log(100)? {
+        let link = match entry.build_id {
+            Some(id) => store.build(id)?.and_then(|build| {
+                store.repo(build.repo_id).ok().flatten().map(|repo| views::build_path(&repo, &build))
+            }),
+            None => match entry.repo_id {
+                Some(id) => store.repo(id)?.map(|repo| views::repo_path(&repo)),
+                None => None,
+            },
+        };
+        audit.push((entry, link));
+    }
     Ok(render(views::system(&context(&web, &viewer), &facts, &audit)))
 }
 

@@ -836,7 +836,7 @@ fn render_log(task: &Task, text: &str) -> Markup {
     }
 }
 
-pub fn system(ctx: &Context<'_>, facts: &[(&str, String)], audit: &[AuditEntry]) -> Markup {
+pub fn system(ctx: &Context<'_>, facts: &[(&str, String)], audit: &[(AuditEntry, Option<String>)]) -> Markup {
     layout(
         "System",
         "system",
@@ -858,11 +858,17 @@ pub fn system(ctx: &Context<'_>, facts: &[(&str, String)], audit: &[AuditEntry])
                         table class="table" {
                             thead { tr { th { "When" } th { "Who" } th { "What" } } }
                             tbody {
-                                @for entry in audit {
+                                @for (entry, link) in audit {
                                     tr {
-                                        td { (time(entry.at)) }
+                                        td class="when" { (time(entry.at)) }
                                         td { (entry.actor) }
-                                        td { (entry.action.replace('_', " ")) @if let Some(detail) = &entry.detail { " " span class="hint" { (detail) } } }
+                                        td {
+                                            @match link {
+                                                Some(link) => a href=(link) { (entry.action.replace('_', " ")) },
+                                                None => (entry.action.replace('_', " ")),
+                                            }
+                                            @if let Some(detail) = &entry.detail { " " span class="hint" { (detail) } }
+                                        }
                                     }
                                 }
                             }

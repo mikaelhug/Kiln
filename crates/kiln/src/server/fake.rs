@@ -514,10 +514,6 @@ impl Platform for Arc<Fake> {
         Ok(())
     }
 
-    async fn build_secrets(&self) -> Result<Vec<(String, i64)>> {
-        Ok(self.state().secrets.iter().map(|(k, v)| (k.clone(), *v)).collect())
-    }
-
     async fn create_pod(&self, pod: &Pod) -> Result<()> {
         let name = pod.metadata.name.clone().unwrap_or_default();
         let mut stored = pod.clone();

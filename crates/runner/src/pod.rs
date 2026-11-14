@@ -334,7 +334,6 @@ impl Builder<'_> {
             "securityContext": {
                 "runAsUser": 1000,
                 "runAsGroup": 1000,
-                "allowPrivilegeEscalation": false,
                 "seccompProfile": { "type": "Unconfined" },
                 "appArmorProfile": { "type": "Unconfined" },
             },

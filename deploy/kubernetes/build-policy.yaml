@@ -1,0 +1,64 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kiln-build-pods
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kiln-builds
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  variables:
+    - name: containers
+      expression: "object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : [])"
+  validations:
+    - expression: "has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false"
+      message: build pods must not mount a service account token
+    - expression: "!(has(object.spec.hostNetwork) && object.spec.hostNetwork) && !(has(object.spec.hostPID) && object.spec.hostPID) && !(has(object.spec.hostIPC) && object.spec.hostIPC)"
+      message: build pods must not share the node's namespaces
+    - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath))"
+      message: build pods must not mount host paths
+    - expression: "variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || c.securityContext.privileged == false)"
+      message: build containers must not be privileged
+    - expression: "variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0)"
+      message: build containers must not add capabilities
+    - expression: "variables.containers.all(c, c.name == 'buildkitd' || !has(c.securityContext) || !has(c.securityContext.seccompProfile) || c.securityContext.seccompProfile.type != 'Unconfined')"
+      message: only the buildkitd container may run without seccomp
+    - expression: "variables.containers.all(c, c.name != 'buildkitd' || c.image.contains('@sha256:'))"
+      message: buildkitd must be pinned by digest
+    - expression: "variables.containers.all(c, c.name == 'buildkitd' || c.name.startsWith('test-') || c.name.startsWith('verify-') || (has(c.securityContext) && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation == false))"
+      message: Kiln's own build containers must not escalate privileges
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: kiln-build-pods
+spec:
+  policyName: kiln-build-pods
+  validationActions: [Deny]
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: kiln-build
+value: -10
+preemptionPolicy: Never
+globalDefault: false
+description: Kiln build pods never preempt other workloads.
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: kiln-builds
+  namespace: kiln-builds
+spec:
+  hard:
+    pods: "6"
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    requests.ephemeral-storage: 60Gi

@@ -178,7 +178,8 @@ impl Platform for Live {
         match self.secrets.create(&PostParams::default(), &secret).await {
             Ok(_) => Ok(()),
             Err(error) if is_status(&error, 409) => {
-                self.secrets.replace(name, &PostParams::default(), &secret).await?;
+                self.delete_secret(name).await?;
+                self.secrets.create(&PostParams::default(), &secret).await?;
                 Ok(())
             }
             Err(error) => Err(error.into()),
@@ -191,18 +192,6 @@ impl Platform for Live {
             Err(error) if is_status(&error, 404) => Ok(()),
             Err(error) => Err(error.into()),
         }
-    }
-
-    async fn build_secrets(&self) -> Result<Vec<(String, i64)>> {
-        let list = self.secrets.list_metadata(&ListParams::default().labels(SELECTOR)).await?;
-        Ok(list
-            .items
-            .into_iter()
-            .filter_map(|secret| {
-                let build = secret.labels().get(BUILD_LABEL)?.parse().ok()?;
-                Some((secret.name_any(), build))
-            })
-            .collect())
     }
 
     async fn create_pod(&self, pod: &Pod) -> Result<()> {
