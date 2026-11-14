@@ -159,6 +159,12 @@ CREATE TABLE registry_scans (
 );
 ALTER TABLE repos ADD COLUMN drift TEXT;
 ",
+    r"
+CREATE TABLE image_owners (
+    image TEXT PRIMARY KEY,
+    repo_id INTEGER NOT NULL REFERENCES repos (id)
+);
+",
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

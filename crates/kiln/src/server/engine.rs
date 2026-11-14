@@ -667,6 +667,19 @@ impl<P: Platform> Engine<P> {
             self.release(build.id).await;
             return Ok(());
         }
+        if !pull_request {
+            for image in &config.images {
+                if let Some(owner) = self.store.claim_image(&image.name, repo.id)? {
+                    let owner =
+                        self.store.repo(owner)?.map(|r| r.full_name()).unwrap_or_else(|| "another repository".into());
+                    return Err(Refusal(format!(
+                        "the image {} belongs to {owner}; choose another image name",
+                        image.name
+                    ))
+                    .into());
+                }
+            }
+        }
         let version = if pull_request { None } else { self.allocate(&repo, build, &config).await? };
         let token = self.platform.fetch_token(&repo).await.context("minting the fetch token")?;
         let secret = format!("{}-fetch", pod_name(build.id, build.attempt));

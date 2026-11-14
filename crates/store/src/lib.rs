@@ -169,6 +169,14 @@ impl Store {
         Ok(unknown)
     }
 
+    pub fn claim_image(&self, image: &str, repo: i64) -> Result<Option<i64>> {
+        let conn = self.conn();
+        conn.execute("INSERT OR IGNORE INTO image_owners (image, repo_id) VALUES (?1, ?2)", params![image, repo])?;
+        let owner: i64 =
+            conn.query_row("SELECT repo_id FROM image_owners WHERE image = ?1", [image], |row| row.get(0))?;
+        Ok((owner != repo).then_some(owner))
+    }
+
     pub fn set_drift(&self, repo: i64, drift: Option<&str>) -> Result<()> {
         self.conn().execute("UPDATE repos SET drift = ?2 WHERE id = ?1", params![repo, drift])?;
         Ok(())

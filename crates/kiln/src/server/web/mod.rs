@@ -205,8 +205,19 @@ fn viewer(user: &User) -> Viewer {
 }
 
 fn flash(path: &str, message: &str) -> Response {
-    let separator = if path.contains('?') { '&' } else { '?' };
-    Redirect::to(&format!("{path}{separator}flash={}", urlencode(message))).into_response()
+    let mut note = Cookie::new("kiln_flash", urlencode(message));
+    note.set_path("/");
+    note.set_secure(true);
+    note.set_same_site(SameSite::Strict);
+    note.set_max_age(time::Duration::seconds(30));
+    (CookieJar::new().add(note), Redirect::to(path)).into_response()
+}
+
+fn safe_next(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.starts_with("//")
+        && !path.contains('\\')
+        && !path.chars().any(|c| c.is_control() || c.is_whitespace())
 }
 
 fn render(markup: Markup) -> Response {
@@ -547,7 +558,7 @@ async fn refresh<P: Platform>(State(web): State<Arc<Web<P>>>, _user: User, heade
         .get(axum::http::header::REFERER)
         .and_then(|v| v.to_str().ok())
         .and_then(|r| r.strip_prefix(web.engine.settings.public_url.as_str()))
-        .filter(|p| p.starts_with('/') && !p.starts_with("//"))
+        .filter(|p| safe_next(p))
         .unwrap_or("/")
         .split('?')
         .next()
@@ -610,10 +621,17 @@ async fn login<P: Platform>(
     jar: CookieJar,
 ) -> Response {
     let mut jar = jar;
-    if let Some(next) = query.next.filter(|n| n.starts_with('/') && !n.starts_with("//")) {
+    if let Some(next) = query.next.filter(|n| safe_next(n)) {
         jar = jar.add(cookie("kiln_next", next, 600));
     }
-    (jar, render(views::login(query.error.as_deref(), web.demo))).into_response()
+    let error = query.error.as_deref().map(|code| match code {
+        "expired" => "The sign-in took too long. Please try again.",
+        "verify" => "The sign-in could not be verified. Please try again.",
+        "denied" => "This GitHub account is not allowed to use this Kiln.",
+        "config" => "GitHub sign-in is not configured on this server.",
+        _ => "GitHub sign-in failed. Please try again.",
+    });
+    (jar, render(views::login(error, web.demo))).into_response()
 }
 
 fn cookie(name: &str, value: String, max_age: i64) -> Cookie<'static> {
@@ -649,23 +667,27 @@ async fn auth_callback<P: Platform>(
     Query(callback): Query<Callback>,
     jar: CookieJar,
 ) -> WebResult<Response> {
-    let back = |message: &str| Redirect::to(&format!("/login?error={}", urlencode(message))).into_response();
+    let back = |code: &str| Redirect::to(&format!("/login?error={code}")).into_response();
     if let Some(error) = callback.error_description {
-        return Ok(back(&error));
+        tracing::info!(error, "GitHub refused the sign-in");
+        return Ok(back("github"));
     }
-    let Some(oauth) = web.oauth.as_ref() else { return Ok(back("GitHub sign-in is not configured")) };
+    let Some(oauth) = web.oauth.as_ref() else { return Ok(back("config")) };
     let Some((state, verifier)) =
         jar.get(OAUTH_COOKIE).and_then(|c| c.value().split_once('.').map(|(a, b)| (a.to_owned(), b.to_owned())))
     else {
-        return Ok(back("The sign-in took too long. Please try again."));
+        return Ok(back("expired"));
     };
     if callback.state.as_deref() != Some(state.as_str()) {
-        return Ok(back("The sign-in could not be verified. Please try again."));
+        return Ok(back("verify"));
     }
     let code = callback.code.ok_or_else(|| WebError::BadRequest("GitHub did not return a code".into()))?;
     let user = match oauth.user(&code, &verifier).await {
         Ok(user) => user,
-        Err(error) => return Ok(back(&format!("GitHub sign-in failed: {error}"))),
+        Err(error) => {
+            tracing::warn!(%error, "GitHub sign-in failed");
+            return Ok(back("github"));
+        }
     };
     let jar = jar.remove(Cookie::build(OAUTH_COOKIE).path("/"));
     if !web.engine.settings.allowed_users.contains(&user.id) {
@@ -677,7 +699,7 @@ async fn auth_callback<P: Platform>(
             build_id: None,
             detail: Some(format!("GitHub user id {}", user.id)),
         })?;
-        return Ok((jar, back(&format!("@{} is not allowed to use this Kiln.", user.login))).into_response());
+        return Ok((jar, back("denied")).into_response());
     }
     start_session(&web, jar, user.id as i64, &user.login, &user.avatar_url, None).await
 }
@@ -710,11 +732,8 @@ async fn start_session<P: Platform>(
         build_id: None,
         detail: None,
     })?;
-    let next = jar
-        .get("kiln_next")
-        .map(|c| c.value().to_owned())
-        .filter(|n| n.starts_with('/') && !n.starts_with("//"))
-        .unwrap_or_else(|| "/".into());
+    let next =
+        jar.get("kiln_next").map(|c| c.value().to_owned()).filter(|n| safe_next(n)).unwrap_or_else(|| "/".into());
     let jar = jar.add(cookie(SESSION_COOKIE, token, SESSION_MAX)).remove(Cookie::build("kiln_next").path("/"));
     Ok((jar, Redirect::to(&next)).into_response())
 }
@@ -774,6 +793,14 @@ async fn webhook<P: Platform>(State(web): State<Arc<Web<P>>>, headers: HeaderMap
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_local_paths_are_followed_after_sign_in() {
+        assert!(safe_next("/o/repo/builds/3?attempt=2"));
+        for hostile in ["//evil.com", "/\\evil.com", "/\tevil.com", "/%09", "https://evil.com", "/ evil", "evil.com"] {
+            assert_eq!(safe_next(hostile), hostile == "/%09", "{hostile:?}");
+        }
+    }
 
     #[test]
     fn webhooks_need_a_valid_signature_from_a_current_or_previous_secret() {

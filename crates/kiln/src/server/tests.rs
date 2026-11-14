@@ -229,3 +229,22 @@ async fn a_tag_on_a_commit_outside_the_default_branch_is_never_built_or_released
     assert!(h.engine.store.tasks(tag.id, 1).unwrap().is_empty(), "no pod ran");
     assert!(h.fake.registry_tag("kiln-demo/web", "9.9.9").is_none());
 }
+
+#[tokio::test]
+async fn a_repository_cannot_release_into_another_repositorys_image() {
+    let h = harness().await;
+    h.fake.push(1, &sha(1), "Ship", Some(CONFIG));
+    h.sync().await;
+    h.until("the release", |b| b.first().is_some_and(|b| b.state == BuildState::Succeeded)).await;
+    h.fake.add_repo(2, "kiln-demo", "intruder");
+    h.fake.push(2, &sha(2), "Pretend to be web", Some(CONFIG));
+    h.engine.reconcile_all(true).await.unwrap();
+    let builds = h.until("the intruder build", |b| b.iter().any(|b| b.repo_id == 2 && b.state.is_finished())).await;
+    let intruder = builds.iter().find(|b| b.repo_id == 2).unwrap();
+    assert_eq!(intruder.state, BuildState::Failed);
+    assert!(
+        intruder.detail.as_deref().unwrap_or_default().contains("belongs to kiln-demo/web"),
+        "{:?}",
+        intruder.detail
+    );
+}

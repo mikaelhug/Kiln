@@ -235,12 +235,10 @@ function connect() {
 enhance(document);
 setInterval(tickTimes, 30000);
 setInterval(tickDurations, 1000);
-const params = new URLSearchParams(location.search);
-if (params.has("flash")) {
-  toast(params.get("flash"));
-  params.delete("flash");
-  const query = params.toString();
-  history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
+const flash = document.cookie.split("; ").find((c) => c.startsWith("kiln_flash="));
+if (flash) {
+  document.cookie = "kiln_flash=; Max-Age=0; Path=/; Secure; SameSite=Strict";
+  toast(decodeURIComponent(flash.slice("kiln_flash=".length).replace(/\+/g, " ")));
 }
 if (page) connect();
 if (page === "build") {
