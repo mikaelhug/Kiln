@@ -293,13 +293,20 @@ async fn fragment_repos<P: Platform>(State(web): State<Arc<Web<P>>>, _user: User
 #[derive(Deserialize, Default)]
 struct Paging {
     before: Option<i64>,
+    show: Option<String>,
 }
 
-fn repo_data<P: Platform>(web: &Web<P>, repo: Repo, before: Option<i64>) -> WebResult<views::RepoData> {
+fn repo_data<P: Platform>(web: &Web<P>, repo: Repo, paging: &Paging) -> WebResult<views::RepoData> {
     let store = &web.engine.store;
     let page = 30;
-    let mut builds =
-        store.builds(&BuildFilter { repo: Some(repo.id), before, limit: page + 1, ..Default::default() })?;
+    let show = views::Show::parse(paging.show.as_deref());
+    let mut builds = store.builds(&BuildFilter {
+        repo: Some(repo.id),
+        before: paging.before,
+        triggers: show.triggers(),
+        limit: page + 1,
+        ..Default::default()
+    })?;
     let more = (builds.len() as i64 > page).then(|| builds[page as usize - 1].id);
     builds.truncate(page as usize);
     let releases = store
@@ -320,7 +327,7 @@ fn repo_data<P: Platform>(web: &Web<P>, repo: Repo, before: Option<i64>) -> WebR
         .filter(|b| b.trigger != Trigger::PullRequest)
         .find_map(|b| b.config.and_then(|text| config::parse(&text, &repo.name).ok()));
     let busy = store.active()?.iter().any(|b| b.repo_id == repo.id);
-    Ok(views::RepoData { repo, builds, releases, config, more, busy })
+    Ok(views::RepoData { repo, builds, releases, config, more, busy, show })
 }
 
 async fn repo_page<P: Platform>(
@@ -331,7 +338,7 @@ async fn repo_page<P: Platform>(
 ) -> WebResult<Response> {
     let viewer = viewer(&user);
     let repo = repo_named(&web, &owner, &name)?;
-    let data = repo_data(&web, repo, paging.before)?;
+    let data = repo_data(&web, repo, &paging)?;
     Ok(render(views::repo(&context(&web, &viewer), &data)))
 }
 
@@ -339,10 +346,11 @@ async fn fragment_repo<P: Platform>(
     State(web): State<Arc<Web<P>>>,
     user: User,
     Path(id): Path<i64>,
+    Query(paging): Query<Paging>,
 ) -> WebResult<Response> {
     let viewer = viewer(&user);
     let repo = web.engine.store.repo(id)?.ok_or_else(|| WebError::NotFound("repository not found".into()))?;
-    let data = repo_data(&web, repo, None)?;
+    let data = repo_data(&web, repo, &Paging { before: None, ..paging })?;
     Ok(render(views::repo_live(&context(&web, &viewer), &data)))
 }
 

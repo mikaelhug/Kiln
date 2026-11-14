@@ -287,6 +287,10 @@ impl Store {
             values.push(sha.clone().into());
             sql.push_str(&format!(" AND sha = ?{}", values.len()));
         }
+        if !filter.triggers.is_empty() {
+            let list = filter.triggers.iter().map(|t| format!("'{}'", t.as_str())).collect::<Vec<_>>().join(", ");
+            sql.push_str(&format!(" AND trigger IN ({list})"));
+        }
         values.push(filter.limit.max(1).into());
         sql.push_str(&format!(" ORDER BY id DESC LIMIT ?{}", values.len()));
         let conn = self.conn();

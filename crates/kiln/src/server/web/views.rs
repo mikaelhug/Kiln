@@ -456,7 +456,45 @@ pub fn repos_live(latest: &[RepoSummary]) -> Markup {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Show {
+    All,
+    Branch,
+    Pulls,
+    Tags,
+}
+
+impl Show {
+    pub fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("branch") => Show::Branch,
+            Some("pulls") => Show::Pulls,
+            Some("tags") => Show::Tags,
+            _ => Show::All,
+        }
+    }
+
+    pub fn triggers(self) -> Vec<Trigger> {
+        match self {
+            Show::All => Vec::new(),
+            Show::Branch => vec![Trigger::Push, Trigger::Manual],
+            Show::Pulls => vec![Trigger::PullRequest],
+            Show::Tags => vec![Trigger::Tag],
+        }
+    }
+
+    fn query(self) -> &'static str {
+        match self {
+            Show::All => "",
+            Show::Branch => "?show=branch",
+            Show::Pulls => "?show=pulls",
+            Show::Tags => "?show=tags",
+        }
+    }
+}
+
 pub struct RepoData {
+    pub show: Show,
     pub repo: Repo,
     pub builds: Vec<Build>,
     pub releases: Vec<(String, i64, i64)>,
@@ -533,12 +571,19 @@ pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
         }
         div class="grid" {
             section class="card" {
-                h2 { "Builds" }
+                div class="tabs" {
+                    @for (show, label) in [(Show::All, "All builds"), (Show::Branch, (repo.default_branch.as_str())), (Show::Pulls, "Pull requests"), (Show::Tags, "Tags")] {
+                        a class=(if show == data.show { "tab active" } else { "tab" }) href={(repo_path(repo)) (show.query())} { (label) }
+                    }
+                }
                 @if data.builds.is_empty() {
-                    div class="empty" { p { "No builds yet." } }
+                    div class="empty" { p { (match data.show { Show::All => "No builds yet.", Show::Branch => "No builds of the default branch yet.", Show::Pulls => "No pull request builds yet.", Show::Tags => "No tag builds yet." }) } }
                 } @else {
                     ul class="list" { @for build in &data.builds { (build_row(build, Some(repo), false)) } }
-                    @if let Some(before) = data.more { a class="more" href={(repo_path(repo)) "?before=" (before)} { "Older builds" } }
+                    @if let Some(before) = data.more {
+                        @let separator = if data.show == Show::All { "?" } else { "&" };
+                        a class="more" href={(repo_path(repo)) (data.show.query()) (separator) "before=" (before)} { "Older builds" }
+                    }
                 }
             }
             aside class="stack" {
@@ -667,6 +712,9 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                     @if let Some(actor) = &build.actor { span { "started by " (actor) } }
                     span { (time(build.created_at)) }
                     (build_duration(build))
+                    @if let Some(started) = build.started_at.filter(|s| s - build.created_at >= 10) {
+                        span { "waited " (duration(started - build.created_at)) " for a slot" }
+                    }
                     @if let Some(original) = &data.rerun_of { span { "rerun of " a href=(build_path(repo, original)) { "#" (original.number) } } }
                 }
             }

@@ -217,6 +217,7 @@ pub struct BuildFilter {
     pub before: Option<i64>,
     pub states: Vec<BuildState>,
     pub sha: Option<String>,
+    pub triggers: Vec<Trigger>,
     pub limit: i64,
 }
 

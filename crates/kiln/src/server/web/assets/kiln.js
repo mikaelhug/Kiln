@@ -64,7 +64,7 @@ function refresh(selector, url) {
 
 function refreshPage() {
   if (page === "dashboard") refresh("#live", "/fragments/dashboard");
-  if (page === "repo") refresh("#live", `/fragments/repo/${repoId}`);
+  if (page === "repo") refresh("#live", `/fragments/repo/${repoId}${location.search}`);
   if (page === "build") {
     refresh("#live", `/fragments/build/${buildId}${location.search}`);
     refresh("#tasks", `/fragments/tasks/${buildId}${location.search}`);
