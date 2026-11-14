@@ -201,8 +201,10 @@ fn write_secret(out: &PathBuf, created: &CreatedApp) -> Result<()> {
     let quote = |value: &str| serde_json::to_string(value).expect("strings serialize");
     let pem: String = created.pem.trim_end().lines().map(|line| format!("    {line}\n")).collect();
     let webhook = created.webhook_secret.clone().context("GitHub did not return a webhook secret")?;
+    let username = created.owner.as_ref().filter(|o| o.kind == "User").map(|o| o.login.clone());
+    let username = quote(&username.unwrap_or_else(|| "replace with the login that owns the registry token".into()));
     let yaml = format!(
-        "apiVersion: v1\nkind: Secret\nmetadata:\n  name: kiln\n  namespace: kiln\ntype: Opaque\nstringData:\n  app-private-key: |\n{pem}  webhook-secret: {}\n  oauth-client-secret: {}\n  registry-password: replace with a token that may push packages\n",
+        "apiVersion: v1\nkind: Secret\nmetadata:\n  name: kiln\n  namespace: kiln\ntype: Opaque\nstringData:\n  app-private-key: |\n{pem}  webhook-secret: {}\n  oauth-client-secret: {}\n  registry-password: replace with a token that may push packages\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: registry-push\n  namespace: kiln-builds\ntype: Opaque\nstringData:\n  username: {username}\n  password: replace with the same token as registry-password\n",
         quote(&webhook),
         quote(&created.client_secret),
     );
@@ -218,9 +220,14 @@ fn write_secret(out: &PathBuf, created: &CreatedApp) -> Result<()> {
 
 fn report(created: &CreatedApp, url: &str, out: &std::path::Path) {
     println!("Created the GitHub App \"{}\" ({}).", created.name, created.html_url);
-    println!("Wrote its secrets to {}. Encrypt it before committing, for example with sops.\n", out.display());
+    println!("Wrote its secrets to {}.", out.display());
+    println!("Use it as deploy/kubernetes/secrets.yaml, put your registry token in both places it asks for,");
+    println!("and encrypt it before committing, for example with sops.\n");
     println!("Set these in deploy/kubernetes/config.yaml:");
     println!("  KILN_PUBLIC_URL: {url}");
+    if let Some(owner) = created.owner.as_ref().filter(|o| o.kind == "User") {
+        println!("  KILN_REGISTRY_USERNAME: {}", owner.login);
+    }
     println!("  KILN_APP_ID: \"{}\"", created.id);
     println!("  KILN_OAUTH_CLIENT_ID: {}", created.client_id);
     if let Some(owner) = &created.owner {

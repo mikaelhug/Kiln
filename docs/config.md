@@ -46,7 +46,7 @@ A failing test or verify job stops the run before anything is released.
 | Key | Default | Runs on |
 |---|---|---|
 | `push` | `true` | pushes to the default branch |
-| `tags` | `true` | tags `vX.Y.Z` or `vX.Y.Z-pre` |
+| `tags` | `true` | tags `vX.Y.Z` or `vX.Y.Z-pre` whose commit is on the default branch; other tags are never built |
 | `pull_request` | `true` | pull request heads: tests only, without secrets |
 
 A head commit message containing `[skip ci]` or `[skip kiln]` is not built.
@@ -90,7 +90,7 @@ A release fails if its version would not be higher than the highest semver tag a
 
 Each step runs in its own process group. When a step ends, anything it started in the background is stopped, so a server needed by later steps belongs in `services`.
 
-Steps see `KILN_SHA`, `KILN_REF`, `KILN_EVENT` and `KILN_VERSION`. In verify jobs they also see `KILN_IMAGE_<NAME>`.
+Steps see `CI=true`, `KILN_REPOSITORY`, `KILN_SHA`, `KILN_REF`, `KILN_EVENT` and `KILN_RUN`, and `KILN_VERSION` except on pull requests. In verify jobs they also see `KILN_IMAGE_<NAME>` with the candidate's image reference; `<NAME>` is the image name in upper case with `-` and `.` turned into `_`.
 
 ### Services
 
@@ -101,10 +101,10 @@ A service sets exactly one of `image` or `candidate`. `candidate` names one of t
 | `name` | |
 | `image` / `candidate` | |
 | `env`, `secrets` | as for jobs |
-| `user` | numeric user and group |
+| `user` | numeric user and group, default `65532`; services run as non-root without capabilities, so they listen on ports above 1024 |
 | `read_only` | read-only root filesystem |
 | `tmpfs` | memory-backed writable directories |
-| `mounts` | `{ "/container/path" = "workspace/dir" }`, read-only |
+| `mounts` | `{ "/container/path" = "dir/in/repo" }`, a directory of the repository mounted read-only |
 | `expect_exit` | exit code required when Kiln stops the service at the end of the build |
 
 ## Validate locally

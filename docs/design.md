@@ -18,7 +18,7 @@ Containers start in order, using native sidecars for long-running services:
 
 1. `fetch` downloads the commit tarball with a single-repository, read-only installation token. The token is mounted only in this container and revoked once it finishes.
 2. One container per test job runs Kiln's step runner as PID 1. It executes the steps in a shared workspace and prints step markers that Kiln turns into status and timing.
-3. A rootless `buildkitd` sidecar listens on a unix socket, with a per-repository cache volume.
+3. A `buildkitd` sidecar (rootless by default) listens on a unix socket, with a per-repository cache volume.
 4. One `buildctl` container per image writes an OCI layout. It has no registry credentials.
 5. `push` is the only container holding the registry push credential. It pushes the layouts as `sha-<commit>` candidates, which semver image automation ignores.
 6. Verify jobs run next to the candidate image as a sidecar.

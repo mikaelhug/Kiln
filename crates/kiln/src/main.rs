@@ -40,7 +40,7 @@ enum Commands {
     },
     #[command(about = "Print the JSON Schema for .kiln.toml")]
     Schema,
-    #[command(about = "Create the Kiln GitHub App and write its credentials as a Kubernetes Secret")]
+    #[command(about = "Create the Kiln GitHub App and write its credentials as Kubernetes Secrets")]
     Setup {
         #[arg(long, help = "The https address Kiln will be reachable at, like https://kiln.example.com")]
         url: String,
@@ -48,7 +48,7 @@ enum Commands {
         org: Option<String>,
         #[arg(long, help = "App name shown on GitHub; must be unique on GitHub")]
         name: Option<String>,
-        #[arg(long, default_value = "kiln-secret.yaml", help = "Where to write the Secret with the app's credentials")]
+        #[arg(long, default_value = "secrets.yaml", help = "Where to write the Secrets with the app's credentials")]
         out: PathBuf,
         #[arg(long, default_value_t = 0, help = "Local port for the setup page; 0 picks a free one")]
         port: u16,

@@ -65,9 +65,9 @@ Open <http://localhost:8080> and choose **Enter the demo**. The demo runs the re
 
 ## Install
 
-Kiln needs a Kubernetes cluster (1.30 or newer; user namespaces give the best isolation), an OCI registry such as GitHub Container Registry, and a public HTTPS address for the UI and webhooks.
+Kiln needs a Kubernetes cluster (1.33 or newer, with user namespaces and network policies), an OCI registry such as GitHub Container Registry, and a public HTTPS address for the UI and webhooks. The [requirements](docs/operations.md#requirements) list the details.
 
-1. **Create the GitHub App.** `kiln setup --url https://kiln.example.com` creates it from a manifest and writes its credentials as a Kubernetes Secret.
+1. **Create the GitHub App.** `kiln setup --url https://kiln.example.com` creates it from a manifest and writes its credentials as Kubernetes Secrets.
 2. **Deploy.** Copy [`deploy/kubernetes`](deploy/kubernetes) into your GitOps repository, fill in the values and apply it.
 3. **Onboard a repository.** Install the app on it and commit a `.kiln.toml`, first with `shadow = true` to compare against your current CI.
 
