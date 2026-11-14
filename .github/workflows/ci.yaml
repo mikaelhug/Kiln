@@ -25,3 +25,12 @@ jobs:
       - run: python3 scripts/no_comments.py
       - run: cargo test --workspace --locked
       - run: cargo run --quiet --locked -p kiln -- schema | diff - schema/kiln.v1.json
+
+  deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25
+        with:
+          command: check
