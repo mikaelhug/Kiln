@@ -573,8 +573,21 @@ fn job_timeout(job: &Job, build_timeout: u64) -> u64 {
 }
 
 fn scale_quantity(quantity: &str, factor: u32) -> Option<String> {
-    let split = quantity.find(|c: char| !c.is_ascii_digit())?;
+    let split = quantity.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(quantity.len());
     let (number, unit) = quantity.split_at(split);
-    let number: u64 = number.parse().ok()?;
-    Some(format!("{}{unit}", number * u64::from(factor)))
+    let scaled = number.parse::<f64>().ok()? * f64::from(factor);
+    let text = format!("{scaled:.3}");
+    Some(format!("{}{unit}", text.trim_end_matches('0').trim_end_matches('.')))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scale_quantity;
+
+    #[test]
+    fn memory_limits_scale_whole_and_fractional_quantities() {
+        assert_eq!(scale_quantity("2Gi", 2).as_deref(), Some("4Gi"));
+        assert_eq!(scale_quantity("1.5Gi", 2).as_deref(), Some("3Gi"));
+        assert_eq!(scale_quantity("768Mi", 2).as_deref(), Some("1536Mi"));
+    }
 }

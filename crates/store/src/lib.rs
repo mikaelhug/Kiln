@@ -56,7 +56,12 @@ impl Store {
     }
 
     pub fn upsert_repo(&self, repo: &RepoSync) -> Result<()> {
-        self.conn().execute(
+        let conn = self.conn();
+        conn.execute(
+            "UPDATE repos SET name = name || '~' || id WHERE owner = ?1 AND name = ?2 AND id != ?3",
+            params![repo.owner, repo.name, repo.id],
+        )?;
+        conn.execute(
             "INSERT INTO repos (id, installation_id, owner, name, default_branch, private, archived, last_seen_at, removed_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL)
              ON CONFLICT(id) DO UPDATE SET installation_id = excluded.installation_id, owner = excluded.owner,

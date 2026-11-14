@@ -57,8 +57,8 @@ async fn run<P: Platform>(
     demo: bool,
     listen: SocketAddr,
 ) -> Result<()> {
-    let app =
-        web::router(Arc::new(web::Web { engine, oauth, demo })).layer(tower_http::trace::TraceLayer::new_for_http());
+    let app = web::router(Arc::new(web::Web { engine, oauth, demo, deliveries: Default::default() }))
+        .layer(tower_http::trace::TraceLayer::new_for_http());
     let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listening on {listen}"))?;
     tracing::info!(%listen, "kiln is listening");
     axum::serve(listener, app).with_graceful_shutdown(shutdown()).await?;

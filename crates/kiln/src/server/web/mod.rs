@@ -39,6 +39,7 @@ pub struct Web<P: Platform> {
     pub engine: Arc<Engine<P>>,
     pub oauth: Option<OAuthApp>,
     pub demo: bool,
+    pub deliveries: std::sync::Mutex<std::collections::VecDeque<String>>,
 }
 
 pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
@@ -48,6 +49,7 @@ pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
         .route("/system", get(system::<P>))
         .route("/system/refresh", post(refresh::<P>))
         .route("/events", get(events::<P>))
+        .route("/fragments/ping", get(|_user: User| async { StatusCode::NO_CONTENT }))
         .route("/fragments/dashboard", get(fragment_dashboard::<P>))
         .route("/fragments/repos", get(fragment_repos::<P>))
         .route("/fragments/repo/{id}", get(fragment_repo::<P>))
@@ -102,6 +104,7 @@ fn asset(kind: &'static str, body: &'static str) -> Response {
 
 pub enum WebError {
     SignIn(String),
+    SignedOut,
     NotFound(String),
     Forbidden(String),
     BadRequest(String),
@@ -126,6 +129,7 @@ impl IntoResponse for WebError {
             WebError::SignIn(next) => {
                 return Redirect::to(&format!("/login?next={}", urlencode(&next))).into_response();
             }
+            WebError::SignedOut => return StatusCode::UNAUTHORIZED.into_response(),
             WebError::NotFound(message) => (StatusCode::NOT_FOUND, message),
             WebError::Forbidden(message) => (StatusCode::FORBIDDEN, message),
             WebError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
@@ -181,7 +185,7 @@ impl<P: Platform> FromRequestParts<Arc<Web<P>>> for User {
 
 fn sign_in(parts: &Parts, next: String) -> WebError {
     if parts.headers.contains_key("x-kiln-fragment") || parts.uri.path().starts_with("/events") {
-        return WebError::Forbidden("sign in again".into());
+        return WebError::SignedOut;
     }
     WebError::SignIn(next)
 }
@@ -766,6 +770,16 @@ async fn webhook<P: Platform>(State(web): State<Arc<Web<P>>>, headers: HeaderMap
     if !verify_signature(&web.engine.settings.webhook_secrets, &body, signature) {
         tracing::warn!("rejected a webhook with a bad signature");
         return StatusCode::UNAUTHORIZED;
+    }
+    if let Some(delivery) = headers.get("x-github-delivery").and_then(|v| v.to_str().ok()) {
+        let mut seen = web.deliveries.lock().expect("deliveries");
+        if seen.iter().any(|d| d == delivery) {
+            return StatusCode::ACCEPTED;
+        }
+        seen.push_back(delivery.to_owned());
+        if seen.len() > 1000 {
+            seen.pop_front();
+        }
     }
     let event = headers.get("x-github-event").and_then(|v| v.to_str().ok()).unwrap_or_default();
     let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&body) else { return StatusCode::BAD_REQUEST };

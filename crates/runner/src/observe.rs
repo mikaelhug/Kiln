@@ -29,6 +29,7 @@ pub fn observe(pod: &Pod, tasks: &[Task], now: i64, pull_grace: i64) -> Observat
     let mut sidecar_exits = Vec::new();
     let mut sidecar_restarts = Vec::new();
 
+    let since = pod.metadata.creation_timestamp.as_ref().map(|t| t.0.as_second()).unwrap_or(now);
     for container in &statuses {
         let task = tasks.iter().find(|t| t.container == container.name);
         let state = container.state.clone().unwrap_or_default();
@@ -40,15 +41,23 @@ pub fn observe(pod: &Pod, tasks: &[Task], now: i64, pull_grace: i64) -> Observat
                 sidecar_restarts.push((container.name.clone(), container.restart_count));
             }
             if let Some(waiting) = &state.waiting {
-                classify_waiting(
-                    &container.name,
-                    waiting.reason.as_deref(),
-                    waiting.message.as_deref(),
-                    &mut config_error,
-                    &mut infra_error,
-                    container.image.as_str(),
-                    true,
-                );
+                let pulling = matches!(waiting.reason.as_deref(), Some("ImagePullBackOff" | "ErrImagePull"));
+                if !(pulling && now - since < pull_grace) {
+                    let label = if container.name == "buildkitd" {
+                        "BuildKit".to_owned()
+                    } else {
+                        format!("the service in {}", container.name)
+                    };
+                    classify_waiting(
+                        &label,
+                        waiting.reason.as_deref(),
+                        waiting.message.as_deref(),
+                        &mut config_error,
+                        &mut infra_error,
+                        container.image.as_str(),
+                        container.name == "buildkitd",
+                    );
+                }
             }
             continue;
         }
@@ -78,7 +87,6 @@ pub fn observe(pod: &Pod, tasks: &[Task], now: i64, pull_grace: i64) -> Observat
         }
         if let Some(waiting) = &state.waiting {
             let user_image = matches!(task.kind, TaskKind::Test | TaskKind::Verify);
-            let since = pod.metadata.creation_timestamp.as_ref().map(|t| t.0.as_second()).unwrap_or(now);
             let patient = now - since < pull_grace;
             let reason = waiting.reason.as_deref();
             if !(patient && matches!(reason, Some("ImagePullBackOff" | "ErrImagePull"))) {

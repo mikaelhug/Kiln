@@ -175,7 +175,7 @@ impl Client {
             kind: String,
         }
         let path = format!("/repos/{repo}/git/matching-refs/tags/v?per_page=100");
-        Ok(match self.get_conditional::<Vec<Ref>>(installation, &path, etag).await? {
+        Ok(match self.get_conditional_list::<Ref>(installation, &path, etag).await? {
             Conditional::NotModified => Conditional::NotModified,
             Conditional::Fresh { value, etag } => Conditional::Fresh {
                 value: value
@@ -235,7 +235,7 @@ impl Client {
             id: u64,
         }
         let path = format!("/repos/{repo}/pulls?state=open&per_page=100");
-        Ok(match self.get_conditional::<Vec<Pull>>(installation, &path, etag).await? {
+        Ok(match self.get_conditional_list::<Pull>(installation, &path, etag).await? {
             Conditional::NotModified => Conditional::NotModified,
             Conditional::Fresh { value, etag } => Conditional::Fresh {
                 value: value

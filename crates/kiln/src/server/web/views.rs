@@ -699,7 +699,7 @@ fn trigger_url(ctx: &Context<'_>, repo: &Repo, build: &Build) -> String {
     let base = format!("{}/{}", ctx.github_web, repo.full_name());
     match build.trigger {
         Trigger::PullRequest => format!("{base}/pull/{}", build.pr_number.unwrap_or_default()),
-        Trigger::Tag => format!("{base}/releases/tag/{}", build.ref_name),
+        Trigger::Tag => format!("{base}/tree/{}", build.ref_name),
         Trigger::Push | Trigger::Manual => format!("{base}/tree/{}", build.ref_name),
     }
 }

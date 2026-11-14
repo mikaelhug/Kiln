@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
 use futures::stream::BoxStream;
-use futures::{AsyncBufReadExt, StreamExt, TryStreamExt};
+use futures::{AsyncReadExt, StreamExt};
 use kiln_github::{CheckRun, Client, Compare, Conditional, Head, PullRequest, TagRef, Token};
 use kiln_registry::{Promotion, Registry};
 use kiln_runner::k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod, Secret};
@@ -236,7 +236,11 @@ impl Platform for Live {
     }
 
     async fn logs(&self, pod: &str, container: &str) -> Result<String> {
-        let params = LogParams { container: Some(container.to_owned()), ..LogParams::default() };
+        let params = LogParams {
+            container: Some(container.to_owned()),
+            limit_bytes: Some(2 * super::logs::MAX_LOG_BYTES as i64),
+            ..LogParams::default()
+        };
         match self.pods.logs(pod, &params).await {
             Ok(text) => Ok(text),
             Err(error) if is_status(&error, 404) || is_status(&error, 400) => Ok(String::new()),
@@ -247,6 +251,17 @@ impl Platform for Live {
     async fn follow(&self, pod: &str, container: &str) -> Result<BoxStream<'static, Result<Vec<u8>>>> {
         let params = LogParams { container: Some(container.to_owned()), follow: true, ..LogParams::default() };
         let reader = self.pods.log_stream(pod, &params).await?;
-        Ok(reader.lines().map_ok(|line| format!("{line}\n").into_bytes()).map_err(anyhow::Error::from).boxed())
+        let stream = futures::stream::unfold(Box::pin(reader), |mut reader| async move {
+            let mut buffer = vec![0u8; 16 * 1024];
+            match reader.read(&mut buffer).await {
+                Ok(0) => None,
+                Ok(read) => {
+                    buffer.truncate(read);
+                    Some((Ok(buffer), reader))
+                }
+                Err(error) => Some((Err(anyhow::Error::from(error)), reader)),
+            }
+        });
+        Ok(stream.boxed())
     }
 }

@@ -82,6 +82,14 @@ impl Logs {
         Ok(text.len() as u64)
     }
 
+    pub fn reset(&self, build: i64, attempt: i64, task: i64) -> Result<()> {
+        let path = self.path(build, attempt, task);
+        std::fs::create_dir_all(path.parent().expect("log path has a parent"))?;
+        std::fs::write(&path, "")?;
+        let _ = self.events.send(Event::LogReset { build, attempt, task });
+        Ok(())
+    }
+
     pub fn read(&self, build: i64, attempt: i64, task: i64, from: u64) -> String {
         let Ok(mut file) = std::fs::File::open(self.path(build, attempt, task)) else { return String::new() };
         if file.seek(SeekFrom::Start(from)).is_err() {

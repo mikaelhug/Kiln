@@ -84,7 +84,7 @@ A release fails if its version would not be higher than the highest semver tag a
 | `env` | literal environment variables |
 | `secrets` | keys of the repository's secret exposed as environment variables, on trusted runs only |
 | `cache` | directories kept between runs of the repository |
-| `services` | sidecars reachable on `localhost` |
+| `services` | sidecars reachable on `localhost`; they start before the job and keep running until the build ends |
 | `timeout` | `"20m"` style, at most `"2h"` |
 | `resources` | `{ cpu = "1", memory = "2Gi" }` |
 
@@ -103,7 +103,7 @@ A service sets exactly one of `image` or `candidate`. `candidate` names one of t
 | `read_only` | read-only root filesystem |
 | `tmpfs` | memory-backed writable directories |
 | `mounts` | `{ "/container/path" = "workspace/dir" }`, read-only |
-| `expect_exit` | exit code required after Kiln stops the service at the end of the job |
+| `expect_exit` | exit code required when Kiln stops the service at the end of the build |
 
 ## Validate locally
 

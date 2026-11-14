@@ -114,7 +114,8 @@ async function loadLog(task, attempt) {
     el.classList.toggle("selected", Number(el.dataset.task) === task);
   }
   try {
-    const response = await fetch(`/fragments/log/${buildId}/${attempt}/${task}`);
+    const response = await fetch(`/fragments/log/${buildId}/${attempt}/${task}`, { headers: { "X-Kiln-Fragment": "1" } });
+    if (response.status === 401) { location.reload(); return; }
     if (!response.ok) return;
     holder.innerHTML = await response.text();
     log.bytes = Number(holder.querySelector("[data-bytes]")?.dataset.bytes || 0);
@@ -126,7 +127,7 @@ async function loadLog(task, attempt) {
 }
 
 function appendLog(text) {
-  const container = document.querySelector("#log .lines:last-of-type") || document.querySelector("#log .log-body");
+  const container = [...document.querySelectorAll("#log .lines")].at(-1) || document.querySelector("#log .log-body");
   if (!container) return;
   const el = logBody();
   const stick = el && nearBottom(el);
@@ -206,7 +207,13 @@ function connect() {
   const dot = document.querySelector(".live-dot");
   const source = new EventSource("/events");
   source.onopen = () => dot?.classList.add("on");
-  source.onerror = () => dot?.classList.remove("on");
+  source.onerror = async () => {
+    dot?.classList.remove("on");
+    try {
+      const response = await fetch("/fragments/ping", { headers: { "X-Kiln-Fragment": "1" } });
+      if (response.status === 401) location.reload();
+    } catch (_) {}
+  };
   source.onmessage = (message) => {
     const event = JSON.parse(message.data);
     if (event.type === "build") {

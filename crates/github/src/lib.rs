@@ -209,6 +209,36 @@ impl Client {
         Ok(Conditional::Fresh { value: response.json().await?, etag })
     }
 
+    async fn get_conditional_list<T: DeserializeOwned>(
+        &self,
+        installation: u64,
+        path: &str,
+        etag: Option<&str>,
+    ) -> Result<Conditional<Vec<T>>> {
+        let auth = self.installation_auth(installation).await?;
+        let mut request = self.request(Method::GET, path, &auth);
+        if let Some(etag) = etag {
+            request = request.header(IF_NONE_MATCH, etag);
+        }
+        let response = self.send(request).await?;
+        if response.status() == StatusCode::NOT_MODIFIED {
+            return Ok(Conditional::NotModified);
+        }
+        let etag = response.headers().get(ETAG).and_then(|v| v.to_str().ok()).map(str::to_owned);
+        let next = next_link(response.headers());
+        let mut value: Vec<T> = response.json().await?;
+        if let Some(next) = next {
+            value.extend(
+                self.paginate::<T>(&auth, &next, |body| match body {
+                    serde_json::Value::Array(items) => items,
+                    _ => Vec::new(),
+                })
+                .await?,
+            );
+        }
+        Ok(Conditional::Fresh { value, etag })
+    }
+
     async fn paginate<T: DeserializeOwned>(
         &self,
         auth: &str,

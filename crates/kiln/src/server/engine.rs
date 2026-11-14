@@ -165,7 +165,7 @@ impl<P: Platform> Engine<P> {
                     continue;
                 }
                 keep.push(repo.id);
-                self.store.upsert_repo(&RepoSync {
+                if let Err(error) = self.store.upsert_repo(&RepoSync {
                     id: repo.id,
                     installation_id: repo.installation_id,
                     owner: repo.owner,
@@ -174,7 +174,9 @@ impl<P: Platform> Engine<P> {
                     private: repo.private,
                     archived: repo.archived,
                     seen_at: now(),
-                })?;
+                }) {
+                    tracing::warn!(%error, "recording a repository failed");
+                }
             }
             self.store.mark_removed(&keep, now())?;
         }
@@ -286,13 +288,12 @@ impl<P: Platform> Engine<P> {
                     None,
                 )?;
             }
-            for build in
-                self.store.queued()?.into_iter().filter(|b| b.repo_id == repo.id && b.trigger == Trigger::PullRequest)
-            {
+            let pending = self.store.queued()?.into_iter().chain(self.store.active()?);
+            for build in pending.filter(|b| b.repo_id == repo.id && b.trigger == Trigger::PullRequest) {
                 if let Some(number) = build.pr_number
                     && !open.contains(&number)
                 {
-                    self.finish(build.id, BuildState::Superseded, None, Some("The pull request was closed".into()))?;
+                    self.cancel_build(&build, "Superseded because the pull request was closed")?;
                 }
             }
             self.store.set_etag(repo.id, EtagKind::Pulls, etag.as_deref())?;
@@ -1195,6 +1196,14 @@ impl<P: Platform> Engine<P> {
         tokio::spawn(async move {
             match engine.platform.follow(&pod, &container).await {
                 Ok(mut stream) => {
+                    {
+                        let finalized = engine.finalized.lock().expect("finalized");
+                        if !finalized.contains(&(build_id, attempt, ordinal))
+                            && let Err(error) = engine.logs.reset(build_id, attempt, ordinal)
+                        {
+                            tracing::warn!(%error, "resetting a live log failed");
+                        }
+                    }
                     let mut offset = 0i64;
                     while let Some(chunk) = stream.next().await {
                         let Ok(bytes) = chunk else { break };
@@ -1266,7 +1275,20 @@ impl<P: Platform> Engine<P> {
         if self.finalized.lock().expect("finalized").contains(&(build.id, attempt, task.ordinal)) {
             return Ok(());
         }
-        let text = self.platform.logs(pod, &task.container).await.unwrap_or_default();
+        let live = self.logs.read(build.id, attempt, task.ordinal, 0);
+        let text = match self.platform.logs(pod, &task.container).await {
+            Ok(fetched) if fetched.len() >= live.len() => fetched,
+            Ok(_) => live.clone(),
+            Err(error) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    pod,
+                    container = task.container,
+                    "fetching the final log failed; keeping the live copy"
+                );
+                live.clone()
+            }
+        };
         let mut offset = 0i64;
         for line in text.split_inclusive('\n') {
             if let Some(marker) = parse_marker(line) {
