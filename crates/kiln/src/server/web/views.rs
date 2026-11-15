@@ -1212,7 +1212,10 @@ pub fn build(ctx: &Context<'_>, data: &BuildData) -> Markup {
         html! {
             div id="live" { (build_head(ctx, data)) }
             div class="build-layout" {
-                div id="tasks" class="side-col" { (sidebar(ctx, data, selected)) }
+                div class="side-col" {
+                    div id="tasks" class="side-stack" { (sidebar(ctx, data, selected)) }
+                    div id="images" class="side-stack" { @if data.images.iter().any(|i| i.digest.is_some()) { (images_card(&data.images)) } }
+                }
                 div class="stack" {
                     div id="log" {
                         div class="log" {
@@ -1226,7 +1229,6 @@ pub fn build(ctx: &Context<'_>, data: &BuildData) -> Markup {
                             }
                         }
                     }
-                    div id="images" { @if data.images.iter().any(|i| i.digest.is_some()) { (images_card(&data.images)) } }
                 }
             }
         },
@@ -1534,24 +1536,20 @@ pub fn images_card(images: &[ImageRecord]) -> Markup {
     html! {
         section class="card" {
             div class="card-head" { h2 { "Images" span class="count" { (images.len()) } } }
-            div class="table-wrap" {
-                table class="table" {
-                    thead { tr { th { "Image" } th { "Digest" } th { "Released as" } } }
-                    tbody {
-                        @for image in images {
-                            tr {
-                                td { div class="cell" { span class="muted" { (icon(Icon::Box)) } strong { (image.name) } } }
-                                td {
-                                    @match &image.digest {
-                                        Some(digest) => span class="digest" {
-                                            code title=(digest) { (&digest[..digest.len().min(19)]) }
-                                            button class="copy" type="button" data-copy=(digest) title="Copy digest" aria-label="Copy digest" { (icon(Icon::Copy)) }
-                                        },
-                                        None => span class="muted" { "Not built" },
-                                    }
-                                }
-                                td { @match &image.released { Some(tag) => span class="pill mono ok" { (icon(Icon::Tag)) (tag) }, None => span class="muted" { "–" } } }
-                            }
+            ul class="image-list" {
+                @for image in images {
+                    li {
+                        div class="image-name" {
+                            span class="muted" { (icon(Icon::Box)) }
+                            strong { (image.name) }
+                            @if let Some(tag) = &image.released { span class="pill mono ok" { (icon(Icon::Tag)) (tag) } }
+                        }
+                        @match &image.digest {
+                            Some(digest) => span class="digest" {
+                                code title=(digest) { (&digest[..digest.len().min(19)]) }
+                                button class="copy" type="button" data-copy=(digest) title="Copy digest" aria-label="Copy digest" { (icon(Icon::Copy)) }
+                            },
+                            None => span class="muted" { "Not built" },
                         }
                     }
                 }

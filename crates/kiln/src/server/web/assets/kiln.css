@@ -606,3 +606,12 @@ main > .banner.warn { align-items: center; }
   body[data-page="build"] #log > .log { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   body[data-page="build"] .log-body { flex: 1; max-height: none; min-height: 240px; }
 }
+.side-stack { display: flex; flex-direction: column; gap: 16px; }
+.side-stack:empty { display: none; }
+.image-list { list-style: none; margin: 0; padding: 4px 16px 10px; }
+.image-list li { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--border); }
+.image-list li:first-child { border-top: none; }
+.image-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.image-name strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-name .pill { margin-left: auto; }
+.image-list .digest { padding-left: 24px; font-size: 12px; }
