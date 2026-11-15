@@ -682,7 +682,11 @@ impl<P: Platform> Engine<P> {
             .into());
         }
         if !pull_request && self.settings.registry_password.is_none() {
-            return Err(Refusal::config("Add a registry token in Settings so Kiln can publish images").into());
+            return Err(Refusal {
+                failure: Failure::Release,
+                message: "Add a registry token in Settings so Kiln can publish images".into(),
+            }
+            .into());
         }
         if !pull_request {
             for image in &config.images {

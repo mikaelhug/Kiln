@@ -8,6 +8,7 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 - `KILN_IMAGE` is optional: a release knows its own image, so image automation only updates the server image.
 - A service that stops or never opens its `port` fails the build instead of waiting for the timeout.
 - `services.port` must be 1 to 65535.
+- A missing registry token shows as such on GitHub instead of ".kiln.toml has errors".
 
 ## 0.2.1
 
