@@ -557,6 +557,7 @@ dialog.confirm .buttons { display: flex; justify-content: flex-end; gap: 8px; pa
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition: none !important; }
+  .status.run svg { animation-duration: 1.6s !important; animation-iteration-count: infinite !important; }
 }
 
 @media (min-width: 2200px) {
