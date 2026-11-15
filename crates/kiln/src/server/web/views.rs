@@ -430,7 +430,7 @@ pub fn resources_card(build: &Build, live: &Live) -> Markup {
                     }
                     (chart())
                 }
-                div class="metrics-foot" { "15 s averages" }
+                div class="metrics-foot" { "~20 s averages" }
             }
         }
     }

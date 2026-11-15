@@ -1505,7 +1505,7 @@ impl<P: Platform> Engine<P> {
     }
 
     async fn usage_loop(self: Arc<Self>) {
-        let mut tick = tokio::time::interval(Duration::from_secs(15));
+        let mut tick = tokio::time::interval(Duration::from_secs(5));
         let mut failing = false;
         loop {
             tick.tick().await;
