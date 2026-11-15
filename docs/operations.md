@@ -93,7 +93,18 @@ Build pods may reach DNS and the internet on ports 80 and 443, and nothing else,
 
 Each repository gets a `ReadWriteOnce` cache claim, created on demand. A build only mounts its own repository's cache, and pull requests use a separate directory in it, so they cannot poison the default branch's cache.
 
-## 6. Configuration reference
+## 6. Read builds from a terminal or an agent
+
+Anyone with access to the `kiln` namespace can read builds and their logs, already redacted, without the UI:
+
+```bash
+kubectl -n kiln exec deploy/kiln -- kiln builds --repo acme/web
+kubectl -n kiln exec deploy/kiln -- kiln logs acme/web 42 --follow
+```
+
+`builds` lists recent builds with their state, version and reason. `logs` prints each task that ran, with step headers; `--task` picks one, and `--follow` keeps printing until the build ends and exits non-zero if it failed.
+
+## 7. Configuration reference
 
 Only `KILN_PUBLIC_URL` is required. Lists are comma-separated.
 
@@ -123,7 +134,7 @@ Only `KILN_PUBLIC_URL` is required. Lists are comma-separated.
 | `KILN_DATA_DIR` | `/data` | database, logs and the hourly backup |
 | `KILN_LISTEN` | `0.0.0.0:8080` | |
 
-## 7. Runbook
+## 8. Runbook
 
 | Situation | What to do |
 |---|---|
@@ -142,7 +153,7 @@ Only `KILN_PUBLIC_URL` is required. Lists are comma-separated.
 
 Kiln keeps its database, including the GitHub App's key and the registry token, on its own volume, and writes a copy to `kiln.backup.db` there every hour. Treat that volume as a secret.
 
-## 8. Try it without a cluster
+## 9. Try it without a cluster
 
 ```bash
 docker run --rm -p 8080:8080 ghcr.io/mikaelhug/kiln:0.2.1 demo --bind 0.0.0.0

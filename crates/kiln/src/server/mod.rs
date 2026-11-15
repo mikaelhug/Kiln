@@ -2,6 +2,7 @@ pub mod checks;
 mod demo;
 pub mod engine;
 pub mod fake;
+pub mod inspect;
 pub mod live;
 pub mod logs;
 pub mod platform;

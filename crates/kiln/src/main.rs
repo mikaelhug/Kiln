@@ -41,6 +41,24 @@ enum Commands {
     Schema,
     #[command(about = "Run the Kiln server")]
     Serve,
+    #[command(about = "List recent builds; run inside the Kiln server pod")]
+    Builds {
+        #[arg(long, help = "owner/name")]
+        repo: Option<String>,
+        #[arg(long, default_value_t = 20)]
+        limit: i64,
+    },
+    #[command(about = "Print a build's logs; run inside the Kiln server pod")]
+    Logs {
+        #[arg(help = "owner/name")]
+        repo: String,
+        #[arg(help = "Build number")]
+        number: i64,
+        #[arg(long, help = "Only this task, by name or container")]
+        task: Option<String>,
+        #[arg(long, short, help = "Keep printing until the build finishes")]
+        follow: bool,
+    },
     #[command(about = "Try Kiln locally with simulated repositories, builds and logs")]
     Demo {
         #[arg(long, default_value_t = 8080)]
@@ -59,6 +77,8 @@ async fn main() -> ExitCode {
         Commands::Plan { event, published, file, repo } => cli::plan(&file, repo, &event, &published),
         Commands::Schema => cli::schema(),
         Commands::Serve => server::serve().await.map(|()| ExitCode::SUCCESS),
+        Commands::Builds { repo, limit } => server::inspect::builds(repo, limit),
+        Commands::Logs { repo, number, task, follow } => server::inspect::logs(repo, number, task, follow).await,
         Commands::Demo { port, bind } => server::demo(bind, port).await.map(|()| ExitCode::SUCCESS),
         Commands::Helper(command) => helper::run(command).await,
     };
