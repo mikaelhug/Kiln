@@ -645,4 +645,3 @@ body[data-page="build"] .pipeline .status.run::before { content: none; }
 .area .line { fill: none; stroke: var(--tone); stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .area .ref { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; vector-effect: non-scaling-stroke; }
 .metric.mem .area .ref { stroke: var(--bad); opacity: 0.5; }
-.metrics-foot { font-size: 11.5px; color: var(--muted); }
