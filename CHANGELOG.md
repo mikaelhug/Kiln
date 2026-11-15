@@ -4,6 +4,7 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+- Image builds that pull a base image from a registry no longer fail with "mkdir /home/user/.docker: read-only file system".
 - `kiln builds` and `kiln logs [--follow]` read builds and their redacted logs inside the server pod, so people and agents can follow a build through `kubectl exec`.
 - Build pods start: the image keeps its binary at `/usr/local/bin/kiln`, so the helper's `/kiln/bin` mount no longer collides with it.
 - A container that cannot start shows the runtime's reason instead of "exited with code 128", and its duration no longer counts from 1970.

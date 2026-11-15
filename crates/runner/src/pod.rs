@@ -12,6 +12,7 @@ use crate::{ATTEMPT_LABEL, BUILD_LABEL, MANAGED_BY, REPO_LABEL, label_value, pod
 const WORKSPACE: &str = "/workspace";
 const KILN_BIN: &str = "/kiln/bin";
 const OUT: &str = "/kiln/out";
+const DOCKER_CONFIG: &str = "/kiln/docker";
 const BUILDKIT_SOCKET: &str = "/run/buildkit";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -316,6 +317,7 @@ impl Builder<'_> {
         }
         self.volumes.push(json!({ "name": "buildkit-run", "emptyDir": {} }));
         self.volumes.push(json!({ "name": "out", "emptyDir": { "sizeLimit": self.settings.output_size } }));
+        self.volumes.push(json!({ "name": "docker-config", "emptyDir": { "sizeLimit": "1Mi" } }));
         let mut args =
             vec![format!("--addr=unix://{BUILDKIT_SOCKET}/buildkitd.sock"), "--oci-worker-net=host".to_owned()];
         args.extend(self.settings.buildkit_args.iter().cloned());
@@ -396,6 +398,7 @@ impl Builder<'_> {
                 json!({ "name": "kiln-bin", "mountPath": KILN_BIN, "readOnly": true }),
                 json!({ "name": "buildkit-run", "mountPath": BUILDKIT_SOCKET }),
                 json!({ "name": "out", "mountPath": OUT }),
+                json!({ "name": "docker-config", "mountPath": DOCKER_CONFIG }),
             ];
             if !image.secrets.is_empty() {
                 for key in image.secrets.values() {
@@ -419,6 +422,7 @@ impl Builder<'_> {
                 "image": self.settings.buildkit_image,
                 "command": command,
                 "args": args,
+                "env": [{ "name": "DOCKER_CONFIG", "value": DOCKER_CONFIG }],
                 "volumeMounts": mounts,
                 "resources": { "requests": { "cpu": "100m", "memory": "128Mi" }, "limits": { "memory": "512Mi" } },
                 "securityContext": restricted(),
