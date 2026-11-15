@@ -41,7 +41,7 @@ Every build goes through **test → build → verify → release**. Pull request
 ## Try it in a minute
 
 ```bash
-docker run --rm -p 8080:8080 ghcr.io/mikaelhug/kiln:0.1.3 demo --bind 0.0.0.0
+docker run --rm -p 8080:8080 ghcr.io/mikaelhug/kiln:0.2.0 demo --bind 0.0.0.0
 ```
 
 Open <http://localhost:8080> and choose **Enter the demo**. The demo runs the real engine and UI against simulated repositories with a few days of history; nothing outside your machine is contacted. With Rust installed, `cargo run -p kiln -- demo` does the same from a checkout.
@@ -65,11 +65,11 @@ Open <http://localhost:8080> and choose **Enter the demo**. The demo runs the re
 
 ## Install
 
-Kiln needs a Kubernetes cluster (1.33 or newer, with user namespaces and network policies), an OCI registry such as GitHub Container Registry, and a public HTTPS address for the UI and webhooks. The [requirements](docs/operations.md#requirements) list the details.
+Kiln needs a Kubernetes cluster (1.30 or newer, with user namespaces and network policies), an OCI registry such as GitHub Container Registry, and a public HTTPS address for the UI and webhooks. The [requirements](docs/operations.md#requirements) list the details.
 
-1. **Create the GitHub App.** `kiln setup --url https://kiln.example.com` creates it from a manifest and writes its credentials as Kubernetes Secrets.
-2. **Deploy.** Copy [`deploy/kubernetes`](deploy/kubernetes) into your GitOps repository, fill in the values and apply it.
-3. **Onboard a repository.** Install the app on it and commit a `.kiln.toml`, first with `shadow = true` to compare against your current CI.
+1. **Deploy.** Copy [`deploy/kubernetes`](deploy/kubernetes), set your address and apply it. There are no secrets to prepare.
+2. **Connect GitHub.** Open Kiln, enter the setup code from its log and click through to GitHub. Kiln creates its own GitHub App.
+3. **Add a registry token** in Settings, then commit a `.kiln.toml` to a repository, first with `shadow = true` to compare against your current CI.
 
 [Operating Kiln](docs/operations.md) walks through each step, the cluster requirements, every setting and a runbook. [Design](docs/design.md) explains how Kiln works and why.
 

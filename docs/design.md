@@ -38,8 +38,9 @@ Pull-request pods only fetch and test. A tag on a commit that was already built 
 - Build pods run in their own namespace:
   - no service account token
   - default-deny network policies, with egress to the public internet only
-  - user namespaces where available
+  - rootless BuildKit, and gVisor for pull request builds where available
   - a validating admission policy that confines the one unconfined-seccomp container to the pinned BuildKit image
-- The UI uses GitHub OAuth, allowlisted by numeric user id, with server-side sessions, origin-checked POSTs and a strict CSP.
+- Kiln creates its own GitHub App through GitHub's manifest flow. A fresh install only accepts this from someone holding the setup code in its log, and keeps the app's credentials and the registry token in its own database.
+- The UI uses GitHub OAuth, limited to the people listed in Settings, with server-side sessions, origin-checked POSTs and a strict CSP.
 - Every hour Kiln compares the registry's semver tags with the versions it released and flags any it did not publish. The first scan of an image only records what is already there.
 - Kiln never builds itself. Its own image comes from GitHub-hosted Actions on this public repository.

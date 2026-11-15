@@ -20,7 +20,6 @@ pub struct Settings {
     pub kiln_image: String,
     pub buildkit_image: String,
     pub buildkit_args: Vec<String>,
-    pub buildkit_rootless: bool,
     pub registry: String,
     pub registry_url: String,
     pub github_api: String,
@@ -28,7 +27,6 @@ pub struct Settings {
     pub push_secret: String,
     pub priority_class: Option<String>,
     pub sandbox_runtime_class: Option<String>,
-    pub user_namespaces: bool,
     pub avoid_labels: BTreeMap<String, String>,
     pub avoid_namespace: Option<String>,
     pub workspace_size: String,
@@ -47,7 +45,6 @@ impl Settings {
             buildkit_image: "moby/buildkit@sha256:2222222222222222222222222222222222222222222222222222222222222222"
                 .into(),
             buildkit_args: vec!["--oci-worker-no-process-sandbox".into()],
-            buildkit_rootless: true,
             registry: "ghcr.io/example".into(),
             registry_url: "https://ghcr.io".into(),
             github_api: "https://api.github.com".into(),
@@ -55,7 +52,6 @@ impl Settings {
             push_secret: "registry-push".into(),
             priority_class: Some("kiln-build".into()),
             sandbox_runtime_class: Some("gvisor".into()),
-            user_namespaces: true,
             avoid_labels: BTreeMap::from([("app.kubernetes.io/name".into(), "kiln".into())]),
             avoid_namespace: Some("kiln".into()),
             workspace_size: "8Gi".into(),
@@ -319,11 +315,7 @@ impl Builder<'_> {
             vec![format!("--addr=unix://{BUILDKIT_SOCKET}/buildkitd.sock"), "--oci-worker-net=host".to_owned()];
         args.extend(self.settings.buildkit_args.iter().cloned());
         let mut buildkit_mounts = vec![json!({ "name": "buildkit-run", "mountPath": BUILDKIT_SOCKET })];
-        let (buildkit_state, buildkit_user) = if self.settings.buildkit_rootless {
-            ("/home/user/.local/share/buildkit", 1000)
-        } else {
-            ("/var/lib/buildkit", 0)
-        };
+        let (buildkit_state, buildkit_user) = ("/home/user/.local/share/buildkit", 1000);
         if self.plan.cache_claim.is_some() {
             buildkit_mounts.push(json!({ "name": "cache", "mountPath": buildkit_state, "subPath": "buildkit" }));
         }
@@ -529,9 +521,6 @@ impl Builder<'_> {
             }],
             "volumes": self.volumes,
         });
-        if self.settings.user_namespaces {
-            spec["hostUsers"] = json!(false);
-        }
         if let Some(class) = &self.settings.priority_class {
             spec["priorityClassName"] = json!(class);
         }

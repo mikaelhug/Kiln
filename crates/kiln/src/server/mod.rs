@@ -32,20 +32,38 @@ pub async fn serve() -> Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,kube=warn".into()),
         )
         .init();
-    if !Settings::github_configured() {
-        let listen = Settings::listen()?;
-        let app = web::unconnected(Settings::public_url()).layer(tower_http::trace::TraceLayer::new_for_http());
+    let listen = Settings::listen()?;
+    let data_dir = Settings::data_dir();
+    std::fs::create_dir_all(&data_dir).with_context(|| format!("creating {}", data_dir.display()))?;
+    let store = Arc::new(Store::open(&data_dir.join("kiln.db"))?);
+    if store.github()?.is_none() {
+        let connect = Arc::new(web::connect::Connect::new(
+            store.clone(),
+            Settings::public_url()?,
+            Settings::github_web(),
+            Settings::github_api(),
+        ));
+        tracing::warn!(
+            code = connect.code,
+            "Kiln is not connected to GitHub. Open it in a browser and enter this setup code"
+        );
+        let app = web::connect::router(connect.clone()).layer(tower_http::trace::TraceLayer::new_for_http());
         let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listening on {listen}"))?;
-        tracing::warn!(%listen, "no GitHub App is configured; serving the connect page until KILN_APP_ID is set");
-        axum::serve(listener, app).with_graceful_shutdown(shutdown()).await?;
-        return Ok(());
+        let stop = connect.clone();
+        let connected = async move {
+            tokio::select! {
+                _ = shutdown() => {}
+                _ = stop.connected.notified() => {}
+            }
+        };
+        axum::serve(listener, app).with_graceful_shutdown(connected).await?;
     }
-    let settings = Arc::new(Settings::from_env()?);
-    std::fs::create_dir_all(&settings.data_dir).with_context(|| format!("creating {}", settings.data_dir.display()))?;
-    let store = Arc::new(Store::open(&settings.data_dir.join("kiln.db"))?);
+    let Some(github) = store.github()? else { return Ok(()) };
+    let settings = Arc::new(Settings::from_env(&github)?);
     let (events, _) = broadcast::channel(4096);
     let logs = Arc::new(Logs::new(settings.data_dir.clone(), events));
     let platform = Arc::new(live::Live::connect(&settings).await?);
+    let nobody = store.people()?.is_empty();
     let engine = Engine::new(store, platform, settings.clone(), logs);
     engine.start();
     engine.poke(None);
@@ -56,22 +74,39 @@ pub async fn serve() -> Result<()> {
         web: settings.github_web.clone(),
         api: settings.github_api.clone(),
     };
-    run(engine, Some(oauth), false, settings.listen).await
+    let claim_code = nobody.then(web::connect::setup_code);
+    if let Some(code) = &claim_code {
+        tracing::warn!(
+            code,
+            "nobody can sign in yet; the first person to sign in with GitHub claims Kiln with this setup code"
+        );
+    }
+    run(engine, Some(oauth), claim_code, false, settings.listen).await
 }
 
 async fn run<P: Platform>(
     engine: Arc<Engine<P>>,
     oauth: Option<OAuthApp>,
+    claim_code: Option<String>,
     demo: bool,
     listen: SocketAddr,
 ) -> Result<()> {
-    let app = web::router(Arc::new(web::Web { engine, oauth, demo, deliveries: Default::default() }))
-        .layer(tower_http::trace::TraceLayer::new_for_http());
+    let app = web::router(Arc::new(web::Web {
+        engine,
+        oauth,
+        demo,
+        claim_code,
+        claims: Default::default(),
+        deliveries: Default::default(),
+    }))
+    .layer(tower_http::trace::TraceLayer::new_for_http());
     let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listening on {listen}"))?;
     tracing::info!(%listen, "kiln is listening");
     axum::serve(listener, app).with_graceful_shutdown(shutdown()).await?;
     Ok(())
 }
+
+pub static RESTART: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 async fn shutdown() {
     let mut terminate =
@@ -79,6 +114,7 @@ async fn shutdown() {
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
         _ = terminate.recv() => {}
+        _ = RESTART.notified() => {}
     }
     tracing::info!("shutting down");
 }

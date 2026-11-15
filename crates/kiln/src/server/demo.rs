@@ -116,7 +116,7 @@ pub async fn demo(bind: std::net::IpAddr, port: u16) -> Result<()> {
         "\n  Kiln demo running at {public_url}\n  Everything is simulated: no GitHub, registry or cluster is contacted.\n  Data lives in {}\n",
         dir.display()
     );
-    super::run(engine, None, true, settings.listen).await?;
+    super::run(engine, None, None, true, settings.listen).await?;
     let _ = std::fs::remove_dir_all(&dir);
     Ok(())
 }

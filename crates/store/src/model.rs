@@ -345,3 +345,30 @@ impl Default for Retention {
         Self { build_days: 90, builds_per_repo: 200, session_idle_secs: 12 * 3600, session_max_secs: 7 * 86_400 }
     }
 }
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GitHubApp {
+    pub app_id: i64,
+    pub slug: String,
+    pub name: String,
+    pub html_url: String,
+    pub client_id: String,
+    pub client_secret: String,
+    pub webhook_secret: String,
+    pub private_key: String,
+    pub owner_login: String,
+    pub owner_id: i64,
+    pub owner_is_user: bool,
+    pub claim_token: Option<String>,
+    pub registry_username: Option<String>,
+    pub registry_token: Option<String>,
+    pub connected_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Person {
+    pub user_id: i64,
+    pub login: String,
+    pub added_by: String,
+    pub added_at: i64,
+}

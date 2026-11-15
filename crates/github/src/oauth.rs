@@ -102,3 +102,20 @@ impl OAuthApp {
         user
     }
 }
+
+pub async fn find_user(api: &str, login: &str) -> Result<GitHubUser> {
+    if login.is_empty() || login.len() > 39 || !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err(Error::Shape(format!("{login:?} is not a GitHub username")));
+    }
+    let response = reqwest::Client::new()
+        .get(format!("{}/users/{login}", api.trim_end_matches('/')))
+        .header(ACCEPT, "application/vnd.github+json")
+        .header(USER_AGENT, AGENT)
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(Error::Status { status, message: response.text().await.unwrap_or_default() });
+    }
+    Ok(response.json().await?)
+}

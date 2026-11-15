@@ -13,7 +13,7 @@ use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Api, ResourceExt};
 
 use super::platform::{Platform, PodEvent, PodRejected, RepoInfo};
-use super::settings::Settings;
+use super::settings::{PULL_SECRET, PUSH_SECRET, Settings};
 
 pub struct Live {
     github: Client,
@@ -38,10 +38,36 @@ impl Live {
         let github = Client::new(&settings.github_api, key)?;
         let registry = Registry::new(
             &settings.registry_url,
-            Some((settings.registry_username.clone(), settings.registry_password.clone())),
+            settings.registry_password.clone().map(|token| (settings.registry_username.clone(), token)),
         )?;
         let kube = kube::Client::try_default().await.context("connecting to the Kubernetes API")?;
         let namespace = &settings.runner.namespace;
+        if let Some(token) = &settings.registry_password {
+            let secrets: Api<Secret> = Api::namespaced(kube.clone(), namespace);
+            let host = settings.registry.split('/').next().unwrap_or_default();
+            let auth = base64_engine(&format!("{}:{token}", settings.registry_username));
+            let docker = serde_json::json!({ "auths": { host: { "username": settings.registry_username, "password": token, "auth": auth } } });
+            for (name, kind, data) in [
+                (
+                    PUSH_SECRET,
+                    "Opaque",
+                    serde_json::json!({ "username": settings.registry_username, "password": token }),
+                ),
+                (
+                    PULL_SECRET,
+                    "kubernetes.io/dockerconfigjson",
+                    serde_json::json!({ ".dockerconfigjson": docker.to_string() }),
+                ),
+            ] {
+                if let Err(error) = put_secret(&secrets, name, kind, data).await {
+                    tracing::error!(
+                        error = format!("{error:#}"),
+                        name,
+                        "writing a registry secret failed; image builds cannot publish"
+                    );
+                }
+            }
+        }
         Ok(Self {
             github,
             registry,
@@ -56,6 +82,27 @@ impl Live {
     fn installation(repo: &Repo) -> u64 {
         repo.installation_id as u64
     }
+}
+
+fn base64_engine(text: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(text)
+}
+
+async fn put_secret(secrets: &Api<Secret>, name: &str, kind: &str, data: serde_json::Value) -> Result<()> {
+    let secret: Secret = serde_json::from_value(serde_json::json!({
+        "metadata": { "name": name, "labels": labels(None) },
+        "type": kind,
+        "stringData": data,
+    }))?;
+    match secrets.create(&PostParams::default(), &secret).await {
+        Ok(_) => return Ok(()),
+        Err(error) if is_status(&error, 409) => {}
+        Err(error) => return Err(error).with_context(|| format!("creating the {name} secret")),
+    }
+    secrets.delete(name, &DeleteParams::default()).await.with_context(|| format!("replacing the {name} secret"))?;
+    secrets.create(&PostParams::default(), &secret).await.with_context(|| format!("creating the {name} secret"))?;
+    Ok(())
 }
 
 fn labels(build: Option<i64>) -> BTreeMap<String, String> {

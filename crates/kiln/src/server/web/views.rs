@@ -9,7 +9,11 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub static ASSET_VERSION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     use sha2::{Digest, Sha256};
-    let digest = Sha256::digest([include_str!("assets/kiln.css"), include_str!("assets/kiln.js")].concat().as_bytes());
+    let digest = Sha256::digest(
+        [include_str!("assets/kiln.css"), include_str!("assets/kiln.js"), include_str!("assets/connect.js")]
+            .concat()
+            .as_bytes(),
+    );
     hex::encode(&digest[..6])
 });
 
@@ -63,6 +67,9 @@ pub enum Icon {
     Gauge,
     Layers,
     Rocket,
+    Cog,
+    Key,
+    Users,
 }
 
 pub fn icon(icon: Icon) -> Markup {
@@ -114,6 +121,13 @@ pub fn icon(icon: Icon) -> Markup {
         Icon::More => r#"<path d="M5 10h.01M10 10h.01M15 10h.01" stroke-width="2.6"/>"#,
         Icon::Gauge => r#"<path d="M3.5 14a7 7 0 1 1 13 0"/><path d="M10 11l3-4"/>"#,
         Icon::Layers => r#"<path d="M10 3l7 4-7 4-7-4z"/><path d="M3 11l7 4 7-4"/>"#,
+        Icon::Cog => {
+            r#"<circle cx="10" cy="10" r="2.5"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/>"#
+        }
+        Icon::Key => r#"<circle cx="7" cy="13" r="3.5"/><path d="M9.5 10.5L16 4M13.5 6.5l2 2M12 8l1.5 1.5"/>"#,
+        Icon::Users => {
+            r#"<circle cx="7.5" cy="7" r="2.8"/><path d="M2.5 16.5a5 5 0 0 1 10 0"/><path d="M13 4.5a2.8 2.8 0 0 1 0 5.2M14.5 12.2a5 5 0 0 1 3 4.3"/>"#
+        }
         Icon::Rocket => {
             r#"<path d="M11.5 14.5L8 11l1-3c1.5-3.5 4-5 8-5 0 4-1.5 6.5-5 8z"/><path d="M8 11l-3 .5L3 9.5l3-1.5M9 12l-.5 3 2 2 1.5-3"/><circle cx="13" cy="7" r="1"/>"#
         }
@@ -298,6 +312,7 @@ pub fn layout(title: &str, nav: &str, ctx: &Context<'_>, attrs: &[(&str, String)
                         (item("builds", "/", Icon::Activity, "Builds"))
                         (item("repos", "/repos", Icon::Book, "Repositories"))
                         (item("system", "/system", Icon::Server, "System"))
+                        (item("settings", "/settings", Icon::Cog, "Settings"))
                     }
                     div class="right" {
                         span class="live" title="Live updates" {
@@ -384,8 +399,7 @@ pub fn login(error: Option<&str>, demo: bool) -> Markup {
     }
 }
 
-pub fn unconnected(public_url: Option<&str>) -> Markup {
-    let url = public_url.unwrap_or("https://kiln.example.com");
+fn auth_page(title: &str, scripts: bool, body: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -393,23 +407,91 @@ pub fn unconnected(public_url: Option<&str>) -> Markup {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 meta name="color-scheme" content="light dark";
-                title { "Connect GitHub · Kiln" }
+                title { (title) " · Kiln" }
                 link rel="icon" href="/assets/favicon.svg" type="image/svg+xml";
                 link rel="stylesheet" href={"/assets/kiln.css?v=" (*ASSET_VERSION)};
+                @if scripts { script src={"/assets/connect.js?v=" (*ASSET_VERSION)} defer {} }
             }
-            body {
-                div class="auth" {
-                    div class="card auth-card" {
-                        span class="mark" { (PreEscaped(LOGO)) }
-                        h1 { "Connect GitHub" }
-                        p { "Kiln is running without a GitHub App." }
-                        pre class="command" { "kiln setup --url " (url) }
-                        a class="button" href="https://github.com/mikaelhug/kiln/blob/main/docs/operations.md#1-create-the-github-app" { (PreEscaped(GITHUB)) "Setup guide" }
-                    }
-                }
-            }
+            body { div class="auth" { div class="card auth-card" { span class="mark" { (PreEscaped(LOGO)) } (body) } } }
         }
     }
+}
+
+pub fn connect(error: Option<&str>) -> Markup {
+    auth_page(
+        "Connect GitHub",
+        false,
+        html! {
+            h1 { "Connect GitHub" }
+            p { "Kiln creates its GitHub App for you." }
+            @if let Some(error) = error {
+                div class="banner bad" { (icon(Icon::Alert)) div class="text" { (error) } }
+            }
+            form class="connect" method="post" action="/setup" {
+                label class="field" {
+                    span { "Setup code" }
+                    input class="input" name="code" required autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX";
+                    small { "In Kiln's log: " code { "kubectl -n kiln logs deploy/kiln" } }
+                }
+                label class="field" {
+                    span { "Organization " em { "optional" } }
+                    input class="input" name="org" autocomplete="off" spellcheck="false" placeholder="Your personal account";
+                }
+                button class="button primary" type="submit" { (PreEscaped(GITHUB)) "Connect GitHub" }
+            }
+        },
+    )
+}
+
+pub fn claim(error: Option<&str>) -> Markup {
+    auth_page(
+        "Claim Kiln",
+        false,
+        html! {
+            h1 { "Claim Kiln" }
+            p { "Nobody can sign in yet. Enter the setup code to become the first." }
+            @if let Some(error) = error {
+                div class="banner bad" { (icon(Icon::Alert)) div class="text" { (error) } }
+            }
+            form class="connect" method="post" action="/claim" {
+                label class="field" {
+                    span { "Setup code" }
+                    input class="input" name="code" required autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX";
+                    small { "In Kiln's log: " code { "kubectl -n kiln logs deploy/kiln" } }
+                }
+                button class="button primary" type="submit" { "Claim" }
+            }
+        },
+    )
+}
+
+pub fn connect_redirect(action: &str, manifest: &str) -> Markup {
+    auth_page(
+        "Connect GitHub",
+        true,
+        html! {
+            h1 { "Opening GitHub…" }
+            form method="post" action=(action) data-autosubmit {
+                input type="hidden" name="manifest" value=(manifest);
+                button class="button primary" type="submit" { (PreEscaped(GITHUB)) "Continue on GitHub" }
+            }
+        },
+    )
+}
+
+pub fn connected(name: &str, install: &str) -> Markup {
+    auth_page(
+        "Connected",
+        false,
+        html! {
+            h1 { "Connected" }
+            p { (name) " is ready. Pick the repositories Kiln builds, then sign in." }
+            div class="stack-buttons" {
+                a class="button primary" href=(install) target="_blank" rel="noopener" { (PreEscaped(GITHUB)) "Choose repositories" }
+                a class="button" href="/login" { "Sign in" }
+            }
+        },
+    )
 }
 
 pub fn error_page(ctx: Option<&Context<'_>>, status: u16, message: &str) -> Markup {
@@ -1511,6 +1593,10 @@ fn action(action: &str) -> (&'static str, Icon, &'static str) {
         "repository_resumed" => ("resumed", Icon::Play, ""),
         "login" => ("signed in", Icon::User, ""),
         "login_denied" => ("was refused sign-in", Icon::Alert, "bad"),
+        "registry_token_saved" => ("saved the registry token for", Icon::Key, ""),
+        "person_added" => ("gave access to", Icon::Users, "ok"),
+        "person_removed" => ("removed access for", Icon::Users, "warn"),
+        "kiln_claimed" => ("claimed Kiln", Icon::Key, "ok"),
         _ => ("", Icon::Activity, ""),
     }
 }
@@ -1582,6 +1668,85 @@ pub fn system(ctx: &Context<'_>, data: &SystemData) -> Markup {
                 aside class="card" {
                     div class="card-head" { h2 { "Configuration" } }
                     dl class="facts" { @for (key, value) in data.facts.iter().filter(|(k, _)| *k != "GitHub API") { dt { (key) } dd { (value) } } }
+                }
+            }
+        },
+    )
+}
+
+pub struct SettingsData {
+    pub github: Option<kiln_store::GitHubApp>,
+    pub people: Vec<kiln_store::Person>,
+    pub registry: String,
+    pub registry_username: String,
+    pub has_token: bool,
+    pub you: String,
+}
+
+pub fn settings(ctx: &Context<'_>, data: &SettingsData) -> Markup {
+    layout(
+        "Settings",
+        "settings",
+        ctx,
+        &[],
+        html! {
+            div class="page-head" { div class="titles" { h1 { "Settings" } } }
+            div class="settings-grid" {
+                section class="card" {
+                    div class="card-head" { h2 { (PreEscaped(GITHUB)) "GitHub" } }
+                    @match &data.github {
+                        Some(app) => {
+                            dl class="facts" {
+                                dt { "App" } dd { a href=(app.html_url) target="_blank" rel="noopener" { (app.name) } }
+                                dt { "Account" } dd { (app.owner_login) }
+                                dt { "Connected" } dd { (time(app.connected_at)) }
+                            }
+                            div class="card-foot start" {
+                                a class="button" href={(app.html_url.trim_end_matches('/')) "/installations/new"} target="_blank" rel="noopener" { (icon(Icon::Book)) "Choose repositories" }
+                            }
+                        },
+                        None => div class="empty compact" { p { "Not connected" } },
+                    }
+                }
+                section class="card" {
+                    div class="card-head" {
+                        h2 { (icon(Icon::Key)) "Registry" }
+                        @if data.has_token { span class="pill ok" { "Token saved" } } @else { span class="pill warn" { "No token" } }
+                    }
+                    form class="settings-form" method="post" action="/settings/registry"
+                        data-confirm="Kiln restarts to use the new token. Running builds continue." data-confirm-title="Save the registry token?" data-confirm-action="Save" {
+                        dl class="facts" { dt { "Publishes to" } dd { code { (data.registry) } } }
+                        label class="field" { span { "Username" } input class="input" name="username" value=(data.registry_username) autocomplete="off" required; }
+                        label class="field" {
+                            span { "Token" }
+                            input class="input" type="password" name="token" autocomplete="new-password" required placeholder=(if data.has_token { "Saved; enter a new one to replace it" } else { "write:packages" });
+                        }
+                        button class="button primary" type="submit" disabled[ctx.demo] { "Save token" }
+                    }
+                }
+                section class="card wide" {
+                    div class="card-head" { h2 { (icon(Icon::Users)) "People" span class="count" { (data.people.len()) } } }
+                    ul class="people" {
+                        @for person in &data.people {
+                            li {
+                                span class="avatar small" { (initial(&person.login)) }
+                                div class="who" {
+                                    strong { (person.login) @if person.login == data.you { span class="muted" { " · you" } } }
+                                    span class="muted" { "Added by " (person.added_by) " · " (time(person.added_at)) }
+                                }
+                                @if data.people.len() > 1 {
+                                    form method="post" action={"/settings/people/" (person.user_id) "/remove"}
+                                        data-confirm={(person.login) " can no longer sign in."} data-confirm-title={"Remove " (person.login) "?"} data-confirm-action="Remove" data-confirm-danger {
+                                        button class="button small danger" type="submit" { "Remove" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    form class="add-person" method="post" action="/settings/people" {
+                        input class="input" name="login" placeholder="GitHub username" autocomplete="off" spellcheck="false" required;
+                        button class="button" type="submit" { "Add" }
+                    }
                 }
             }
         },

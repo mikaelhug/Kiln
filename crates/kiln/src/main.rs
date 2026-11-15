@@ -1,7 +1,6 @@
 mod cli;
 mod helper;
 mod server;
-mod setup;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -40,25 +39,6 @@ enum Commands {
     },
     #[command(about = "Print the JSON Schema for .kiln.toml")]
     Schema,
-    #[command(about = "Create the Kiln GitHub App and write its credentials as Kubernetes Secrets")]
-    Setup {
-        #[arg(long, help = "The https address Kiln will be reachable at, like https://kiln.example.com")]
-        url: String,
-        #[arg(long, help = "Create the app in this organization instead of your personal account")]
-        org: Option<String>,
-        #[arg(long, help = "App name shown on GitHub; must be unique on GitHub")]
-        name: Option<String>,
-        #[arg(long, default_value = "secrets.yaml", help = "Where to write the Secrets with the app's credentials")]
-        out: PathBuf,
-        #[arg(long, default_value_t = 0, help = "Local port for the setup page; 0 picks a free one")]
-        port: u16,
-        #[arg(long, help = "Print the setup address instead of opening a browser")]
-        no_browser: bool,
-        #[arg(long, default_value = "https://github.com", hide = true)]
-        github: String,
-        #[arg(long, default_value = "https://api.github.com", hide = true)]
-        api: String,
-    },
     #[command(about = "Run the Kiln server")]
     Serve,
     #[command(about = "Try Kiln locally with simulated repositories, builds and logs")]
@@ -78,9 +58,6 @@ async fn main() -> ExitCode {
         Commands::Validate { file, repo, json } => cli::validate(&file, repo, json),
         Commands::Plan { event, published, file, repo } => cli::plan(&file, repo, &event, &published),
         Commands::Schema => cli::schema(),
-        Commands::Setup { url, org, name, out, port, no_browser, github, api } => {
-            setup::run(setup::Options { url, org, name, out, port, browser: !no_browser, github, api }).await
-        }
         Commands::Serve => server::serve().await.map(|()| ExitCode::SUCCESS),
         Commands::Demo { port, bind } => server::demo(bind, port).await.map(|()| ExitCode::SUCCESS),
         Commands::Helper(command) => helper::run(command).await,

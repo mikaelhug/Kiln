@@ -69,7 +69,6 @@ fn credentials_stay_in_the_containers_that_need_them() {
     let rendered = render(&plan(&config, Scope::Full, true), &settings).unwrap();
     let spec = rendered.pod.spec.clone().unwrap();
     assert_eq!(spec.automount_service_account_token, Some(false));
-    assert_eq!(spec.host_users, Some(false));
     assert_eq!(spec.runtime_class_name, None, "BuildKit cannot run in the sandbox runtime");
 
     for container in containers(&rendered.pod) {

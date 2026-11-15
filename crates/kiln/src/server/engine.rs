@@ -114,7 +114,7 @@ impl<P: Platform> Engine<P> {
         )
     }
 
-    fn audit(&self, actor: &str, action: &str, repo: Option<i64>, build: Option<i64>, detail: Option<String>) {
+    pub fn audit(&self, actor: &str, action: &str, repo: Option<i64>, build: Option<i64>, detail: Option<String>) {
         let entry = AuditEntry {
             at: now(),
             actor: actor.into(),
@@ -680,6 +680,9 @@ impl<P: Platform> Engine<P> {
                 build.ref_name, repo.default_branch
             ))
             .into());
+        }
+        if !pull_request && self.settings.registry_password.is_none() {
+            return Err(Refusal::config("Add a registry token in Settings so Kiln can publish images").into());
         }
         if !pull_request {
             for image in &config.images {

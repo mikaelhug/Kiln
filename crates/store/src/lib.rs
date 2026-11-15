@@ -725,6 +725,146 @@ impl Store {
         tx.commit()?;
         Ok(expired)
     }
+
+    pub fn github(&self) -> Result<Option<GitHubApp>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT app_id, slug, name, html_url, client_id, client_secret, webhook_secret, private_key, owner_login,
+                        owner_id, owner_is_user, claim_token, registry_username, registry_token, connected_at
+                 FROM github WHERE id = 1",
+                [],
+                |row| {
+                    Ok(GitHubApp {
+                        app_id: row.get(0)?,
+                        slug: row.get(1)?,
+                        name: row.get(2)?,
+                        html_url: row.get(3)?,
+                        client_id: row.get(4)?,
+                        client_secret: row.get(5)?,
+                        webhook_secret: row.get(6)?,
+                        private_key: row.get(7)?,
+                        owner_login: row.get(8)?,
+                        owner_id: row.get(9)?,
+                        owner_is_user: row.get(10)?,
+                        claim_token: row.get(11)?,
+                        registry_username: row.get(12)?,
+                        registry_token: row.get(13)?,
+                        connected_at: row.get(14)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub fn connect_github(&self, app: &GitHubApp) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let inserted = tx.execute(
+            "INSERT OR IGNORE INTO github (id, app_id, slug, name, html_url, client_id, client_secret, webhook_secret,
+                 private_key, owner_login, owner_id, owner_is_user, claim_token, registry_username, registry_token, connected_at)
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            params![
+                app.app_id,
+                app.slug,
+                app.name,
+                app.html_url,
+                app.client_id,
+                app.client_secret,
+                app.webhook_secret,
+                app.private_key,
+                app.owner_login,
+                app.owner_id,
+                app.owner_is_user,
+                app.claim_token,
+                app.registry_username,
+                app.registry_token,
+                app.connected_at
+            ],
+        )?;
+        if inserted == 1 && app.owner_is_user {
+            tx.execute(
+                "INSERT OR IGNORE INTO people (user_id, login, added_by, added_at) VALUES (?1, ?2, 'kiln', ?3)",
+                params![app.owner_id, app.owner_login, app.connected_at],
+            )?;
+        }
+        tx.commit()?;
+        Ok(inserted == 1)
+    }
+
+    pub fn set_registry(&self, username: &str, token: &str) -> Result<()> {
+        self.conn().execute(
+            "UPDATE github SET registry_username = ?1, registry_token = ?2 WHERE id = 1",
+            params![username, token],
+        )?;
+        Ok(())
+    }
+
+    pub fn people(&self) -> Result<Vec<Person>> {
+        let conn = self.conn();
+        let mut statement =
+            conn.prepare("SELECT user_id, login, added_by, added_at FROM people ORDER BY added_at, login")?;
+        let rows = statement.query_map([], |row| {
+            Ok(Person { user_id: row.get(0)?, login: row.get(1)?, added_by: row.get(2)?, added_at: row.get(3)? })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn is_person(&self, user_id: i64) -> Result<bool> {
+        Ok(self
+            .conn()
+            .query_row("SELECT EXISTS (SELECT 1 FROM people WHERE user_id = ?1)", [user_id], |row| row.get(0))?)
+    }
+
+    pub fn add_person(&self, person: &Person) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO people (user_id, login, added_by, added_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (user_id) DO UPDATE SET login = excluded.login",
+            params![person.user_id, person.login, person.added_by, person.added_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_person(&self, user_id: i64) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let others: i64 =
+            tx.query_row("SELECT COUNT(*) FROM people WHERE user_id != ?1", [user_id], |row| row.get(0))?;
+        if others == 0 {
+            return Ok(false);
+        }
+        tx.execute("DELETE FROM people WHERE user_id = ?1", [user_id])?;
+        tx.execute("DELETE FROM sessions WHERE user_id = ?1", [user_id])?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    pub fn add_first_person(&self, person: &Person) -> Result<bool> {
+        let inserted = self.conn().execute(
+            "INSERT INTO people (user_id, login, added_by, added_at)
+             SELECT ?1, ?2, ?3, ?4 WHERE NOT EXISTS (SELECT 1 FROM people)",
+            params![person.user_id, person.login, person.added_by, person.added_at],
+        )?;
+        Ok(inserted == 1)
+    }
+
+    pub fn claim_first_person(&self, token: &str, person: &Person) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let expected: Option<String> =
+            tx.query_row("SELECT claim_token FROM github WHERE id = 1", [], |row| row.get(0)).optional()?.flatten();
+        let empty: bool = tx.query_row("SELECT NOT EXISTS (SELECT 1 FROM people)", [], |row| row.get(0))?;
+        if !empty || expected.as_deref() != Some(token) {
+            return Ok(false);
+        }
+        tx.execute(
+            "INSERT INTO people (user_id, login, added_by, added_at) VALUES (?1, ?2, ?3, ?4)",
+            params![person.user_id, person.login, person.added_by, person.added_at],
+        )?;
+        tx.execute("UPDATE github SET claim_token = NULL WHERE id = 1", [])?;
+        tx.commit()?;
+        Ok(true)
+    }
 }
 
 const REPO_COLUMNS: &str = "id, installation_id, owner, name, default_branch, private, archived, enrolled, paused, \

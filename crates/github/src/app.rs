@@ -36,7 +36,7 @@ pub struct ManifestOwner {
     pub kind: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(serde::Deserialize)]
 pub struct CreatedApp {
     pub id: u64,
     pub slug: String,

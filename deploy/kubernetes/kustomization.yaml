@@ -7,4 +7,3 @@ resources:
   - network-policies.yaml
   - server.yaml
   - config.yaml
-  - secrets.yaml

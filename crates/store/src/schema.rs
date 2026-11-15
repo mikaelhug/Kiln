@@ -170,6 +170,32 @@ INSERT OR IGNORE INTO image_owners (image, repo_id)
 SELECT i.name, b.repo_id FROM images i JOIN builds b ON b.id = i.build_id
 WHERE i.released IS NOT NULL ORDER BY b.id;
 ",
+    r"
+CREATE TABLE github (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    app_id INTEGER NOT NULL,
+    slug TEXT NOT NULL,
+    name TEXT NOT NULL,
+    html_url TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    client_secret TEXT NOT NULL,
+    webhook_secret TEXT NOT NULL,
+    private_key TEXT NOT NULL,
+    owner_login TEXT NOT NULL,
+    owner_id INTEGER NOT NULL,
+    owner_is_user INTEGER NOT NULL,
+    claim_token TEXT,
+    registry_username TEXT,
+    registry_token TEXT,
+    connected_at INTEGER NOT NULL
+);
+CREATE TABLE people (
+    user_id INTEGER PRIMARY KEY,
+    login TEXT NOT NULL,
+    added_by TEXT NOT NULL,
+    added_at INTEGER NOT NULL
+);
+",
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

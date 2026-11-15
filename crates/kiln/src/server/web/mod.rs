@@ -1,4 +1,5 @@
 mod ansi;
+pub mod connect;
 mod views;
 
 use std::convert::Infallible;
@@ -31,6 +32,8 @@ use views::{Context, Viewer};
 
 const SESSION_COOKIE: &str = "__Host-kiln_session";
 const OAUTH_COOKIE: &str = "__Host-kiln_oauth";
+pub const CLAIM_COOKIE: &str = "__Host-kiln_claim";
+const PENDING_COOKIE: &str = "__Host-kiln_pending";
 const SESSION_IDLE: i64 = 12 * 3600;
 const SESSION_MAX: i64 = 7 * 86_400;
 fn content_policy(github_web: &str) -> HeaderValue {
@@ -52,30 +55,9 @@ pub struct Web<P: Platform> {
     pub engine: Arc<Engine<P>>,
     pub oauth: Option<OAuthApp>,
     pub demo: bool,
+    pub claim_code: Option<String>,
+    pub claims: std::sync::Mutex<std::collections::HashMap<String, (kiln_github::GitHubUser, i64)>>,
     pub deliveries: std::sync::Mutex<std::collections::VecDeque<String>>,
-}
-
-pub fn unconnected(public_url: Option<String>) -> Router {
-    let page = views::unconnected(public_url.as_deref()).into_string();
-    Router::new()
-        .route("/healthz", get(|| async { "ok" }))
-        .route("/readyz", get(|| async { "ok" }))
-        .route("/assets/kiln.css", get(|| async { asset("text/css; charset=utf-8", include_str!("assets/kiln.css")) }))
-        .route("/assets/favicon.svg", get(|| async { asset("image/svg+xml", include_str!("assets/favicon.svg")) }))
-        .fallback(get(move || {
-            let page = page.clone();
-            async move { ([(CACHE_CONTROL, "no-store")], maud::PreEscaped(page)) }
-        }))
-        .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(
-                "default-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
-            ),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::X_CONTENT_TYPE_OPTIONS,
-            HeaderValue::from_static("nosniff"),
-        ))
 }
 
 pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
@@ -85,6 +67,10 @@ pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
         .route("/repos", get(repos::<P>))
         .route("/system", get(system::<P>))
         .route("/system/refresh", post(refresh::<P>))
+        .route("/settings", get(settings_page::<P>))
+        .route("/settings/registry", post(save_registry::<P>))
+        .route("/settings/people", post(add_person::<P>))
+        .route("/settings/people/{id}/remove", post(remove_person::<P>))
         .route("/events", get(events::<P>))
         .route("/fragments/ping", get(|_user: User| async { StatusCode::NO_CONTENT }))
         .route("/fragments/dashboard", get(fragment_dashboard::<P>))
@@ -95,6 +81,7 @@ pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
         .route("/fragments/log/{build}/{attempt}/{task}", get(fragment_log::<P>))
         .route("/builds/{build}/logs/{attempt}/{task}", get(raw_log::<P>))
         .route("/login", get(login::<P>))
+        .route("/claim", get(claim_page::<P>).post(claim::<P>))
         .route("/auth/github", get(auth_start::<P>))
         .route("/auth/callback", get(auth_callback::<P>))
         .route("/logout", post(logout::<P>))
@@ -221,7 +208,7 @@ impl<P: Platform> FromRequestParts<Arc<Web<P>>> for User {
         let store = &web.engine.store;
         let Some(session) = store.session(&id_hash)? else { return Err(sign_in(parts, next)) };
         let now = unix_now();
-        let allowed = web.demo || web.engine.settings.allowed_users.contains(&(session.user_id as u64));
+        let allowed = web.demo || store.is_person(session.user_id)?;
         if !allowed || now - session.seen_at > SESSION_IDLE || now - session.created_at > SESSION_MAX {
             store.delete_session(&id_hash)?;
             return Err(sign_in(parts, next));
@@ -734,6 +721,93 @@ async fn readyz<P: Platform>(State(web): State<Arc<Web<P>>>) -> (StatusCode, &'s
     }
 }
 
+async fn settings_page<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebResult<Response> {
+    let viewer = viewer(&user);
+    let store = &web.engine.store;
+    let data = views::SettingsData {
+        github: store.github()?,
+        people: store.people()?,
+        registry: web.engine.settings.registry.clone(),
+        registry_username: web.engine.settings.registry_username.clone(),
+        has_token: web.engine.settings.registry_password.is_some(),
+        you: user.login.clone(),
+    };
+    Ok(render(views::settings(&context(&web, &viewer), &data)))
+}
+
+#[derive(Deserialize)]
+struct RegistryForm {
+    username: String,
+    token: String,
+}
+
+async fn save_registry<P: Platform>(
+    State(web): State<Arc<Web<P>>>,
+    user: User,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<RegistryForm>,
+) -> WebResult<Response> {
+    same_origin(&web, &headers)?;
+    if web.demo {
+        return Ok(flash("/settings", "Not available in the demo"));
+    }
+    let (username, token) = (form.username.trim(), form.token.trim());
+    if username.is_empty() || token.is_empty() {
+        return Ok(flash("/settings", "Enter a username and a token"));
+    }
+    web.engine.store.set_registry(username, token)?;
+    web.engine.audit(&user.login, "registry_token_saved", None, None, Some(username.to_owned()));
+    tokio::spawn(async {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        super::RESTART.notify_one();
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        std::process::exit(0);
+    });
+    Ok(flash("/settings", "Saved; Kiln restarts to use it"))
+}
+
+#[derive(Deserialize)]
+struct PersonForm {
+    login: String,
+}
+
+async fn add_person<P: Platform>(
+    State(web): State<Arc<Web<P>>>,
+    user: User,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<PersonForm>,
+) -> WebResult<Response> {
+    same_origin(&web, &headers)?;
+    let login = form.login.trim().trim_start_matches('@');
+    let found = match kiln_github::find_user(&web.engine.settings.github_api, login).await {
+        Ok(found) => found,
+        Err(_) => return Ok(flash("/settings", &format!("No GitHub user named {login}"))),
+    };
+    web.engine.store.add_person(&kiln_store::Person {
+        user_id: found.id as i64,
+        login: found.login.clone(),
+        added_by: user.login.clone(),
+        added_at: unix_now(),
+    })?;
+    web.engine.audit(&user.login, "person_added", None, None, Some(found.login.clone()));
+    Ok(flash("/settings", &format!("{} can sign in", found.login)))
+}
+
+async fn remove_person<P: Platform>(
+    State(web): State<Arc<Web<P>>>,
+    user: User,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> WebResult<Response> {
+    same_origin(&web, &headers)?;
+    let login = web.engine.store.people()?.into_iter().find(|p| p.user_id == id).map(|p| p.login).unwrap_or_default();
+    if !web.engine.store.remove_person(id)? {
+        return Ok(flash("/settings", "Someone has to keep access"));
+    }
+    web.engine.audit(&user.login, "person_removed", None, None, Some(login.clone()));
+    Ok(flash("/settings", &format!("{login} removed")))
+}
+
 async fn system<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebResult<Response> {
     let viewer = viewer(&user);
     let settings = &web.engine.settings;
@@ -745,7 +819,7 @@ async fn system<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebR
         ("Checks GitHub every", format!("{}s", settings.poll_secs)),
         ("Build timeout", super::checks::duration(settings.build_timeout_secs as i64)),
         ("Attempts", settings.max_attempts.to_string()),
-        ("User namespaces", if settings.runner.user_namespaces { "on".into() } else { "off".into() }),
+        ("Sandbox runtime", settings.runner.sandbox_runtime_class.clone().unwrap_or_else(|| "default".into())),
     ];
     facts.extend(web.engine.platform.status());
     let store = &web.engine.store;
@@ -873,7 +947,28 @@ async fn auth_callback<P: Platform>(
         }
     };
     let jar = jar.remove(Cookie::build(OAUTH_COOKIE).path("/").secure(true));
-    if !web.engine.settings.allowed_users.contains(&user.id) {
+    let store = &web.engine.store;
+    let claimed = match jar.get(CLAIM_COOKIE) {
+        Some(claim) => store.claim_first_person(
+            claim.value(),
+            &kiln_store::Person {
+                user_id: user.id as i64,
+                login: user.login.clone(),
+                added_by: user.login.clone(),
+                added_at: unix_now(),
+            },
+        )?,
+        None => false,
+    };
+    let jar = jar.remove(Cookie::build(CLAIM_COOKIE).path("/").secure(true));
+    if !claimed && !store.is_person(user.id as i64)? && web.claim_code.is_some() && store.people()?.is_empty() {
+        let token = kiln_github::random_token();
+        let mut claims = web.claims.lock().expect("claims");
+        claims.retain(|_, (_, expires)| *expires > unix_now());
+        claims.insert(token.clone(), (user, unix_now() + 900));
+        return Ok((jar.add(cookie(PENDING_COOKIE, token, 900)), Redirect::to("/claim")).into_response());
+    }
+    if !claimed && !store.is_person(user.id as i64)? {
         web.engine.store.audit(&kiln_store::AuditEntry {
             at: unix_now(),
             actor: user.login.clone(),
@@ -884,6 +979,54 @@ async fn auth_callback<P: Platform>(
         })?;
         return Ok((jar, back("denied")).into_response());
     }
+    start_session(&web, jar, user.id as i64, &user.login, &user.avatar_url, None).await
+}
+
+async fn claim_page<P: Platform>(State(web): State<Arc<Web<P>>>, jar: CookieJar) -> Response {
+    let pending = jar.get(PENDING_COOKIE).is_some_and(|c| web.claims.lock().expect("claims").contains_key(c.value()));
+    if !pending {
+        return Redirect::to("/login").into_response();
+    }
+    render(views::claim(None))
+}
+
+#[derive(Deserialize)]
+struct ClaimForm {
+    code: String,
+}
+
+async fn claim<P: Platform>(
+    State(web): State<Arc<Web<P>>>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    axum::Form(form): axum::Form<ClaimForm>,
+) -> WebResult<Response> {
+    same_origin(&web, &headers)?;
+    let Some(token) = jar.get(PENDING_COOKIE).map(|c| c.value().to_owned()) else {
+        return Ok(Redirect::to("/login").into_response());
+    };
+    let Some(expected) = web.claim_code.as_deref() else { return Ok(Redirect::to("/login").into_response()) };
+    if !connect::same_code(&form.code, expected) {
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        return Ok(render(views::claim(Some("That setup code is not right."))));
+    }
+    let Some((user, expires)) = web.claims.lock().expect("claims").remove(&token) else {
+        return Ok(Redirect::to("/login").into_response());
+    };
+    if expires < unix_now() {
+        return Ok(Redirect::to("/login?error=expired").into_response());
+    }
+    let person = kiln_store::Person {
+        user_id: user.id as i64,
+        login: user.login.clone(),
+        added_by: user.login.clone(),
+        added_at: unix_now(),
+    };
+    if !web.engine.store.add_first_person(&person)? {
+        return Ok(Redirect::to("/login?error=denied").into_response());
+    }
+    web.engine.audit(&user.login, "kiln_claimed", None, None, None);
+    let jar = jar.remove(Cookie::build(PENDING_COOKIE).path("/").secure(true));
     start_session(&web, jar, user.id as i64, &user.login, &user.avatar_url, None).await
 }
 
@@ -973,7 +1116,7 @@ async fn webhook<P: Platform>(State(web): State<Arc<Web<P>>>, headers: HeaderMap
             let build = payload["check_run"]["external_id"].as_str().and_then(|id| id.parse::<i64>().ok());
             let login = payload["sender"]["login"].as_str().unwrap_or("github");
             if let Some(build) = build
-                && web.engine.settings.allowed_users.contains(&sender)
+                && web.engine.store.is_person(sender as i64).unwrap_or(false)
                 && let Err(error) = web.engine.rerun(build, login).await
             {
                 tracing::warn!(error = format!("{error:#}"), build, "rerun from GitHub failed");

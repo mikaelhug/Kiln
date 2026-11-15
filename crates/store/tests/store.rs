@@ -1,4 +1,6 @@
-use kiln_store::{BuildFilter, BuildState, BuildUpdate, NewBuild, RepoSync, Retention, Store, Trigger};
+use kiln_store::{
+    BuildFilter, BuildState, BuildUpdate, GitHubApp, NewBuild, Person, RepoSync, Retention, Store, Trigger,
+};
 
 fn repo(store: &Store, id: i64, name: &str) {
     store
@@ -98,4 +100,49 @@ fn retention_keeps_each_repositorys_latest_and_latest_branch_build() {
     assert!(store.prune(400 * 86_400, &Retention::default()).unwrap().is_empty());
     let next = store.insert_build(&build(1, Trigger::Push, "ccc", None, 0)).unwrap().unwrap();
     assert_eq!(store.build(next).unwrap().unwrap().number, 3, "numbering continues after pruning");
+}
+
+fn app(owner_is_user: bool) -> GitHubApp {
+    GitHubApp {
+        app_id: 1,
+        slug: "kiln".into(),
+        name: "Kiln".into(),
+        html_url: "https://github.com/apps/kiln".into(),
+        client_id: "Iv1".into(),
+        client_secret: "secret".into(),
+        webhook_secret: "hook".into(),
+        private_key: "pem".into(),
+        owner_login: "owner".into(),
+        owner_id: 10,
+        owner_is_user,
+        claim_token: Some("claim".into()),
+        registry_username: None,
+        registry_token: None,
+        connected_at: 0,
+    }
+}
+
+fn person(id: i64) -> Person {
+    Person { user_id: id, login: format!("user{id}"), added_by: "test".into(), added_at: 0 }
+}
+
+#[test]
+fn only_the_connecting_browser_claims_an_organization_install_and_only_once() {
+    let store = Store::in_memory().unwrap();
+    assert!(!store.claim_first_person("claim", &person(20)).unwrap(), "nothing is connected yet");
+    assert!(store.connect_github(&app(false)).unwrap());
+    assert!(!store.connect_github(&app(false)).unwrap(), "a connection is never replaced");
+    assert!(!store.claim_first_person("guess", &person(20)).unwrap());
+    assert!(store.claim_first_person("claim", &person(20)).unwrap());
+    assert!(!store.claim_first_person("claim", &person(30)).unwrap(), "the claim is single use");
+    assert!(store.is_person(20).unwrap() && !store.is_person(30).unwrap());
+    assert!(!store.remove_person(20).unwrap(), "the last person stays");
+}
+
+#[test]
+fn a_personal_install_lets_its_owner_in() {
+    let store = Store::in_memory().unwrap();
+    store.connect_github(&app(true)).unwrap();
+    assert!(store.is_person(10).unwrap());
+    assert!(!store.claim_first_person("claim", &person(20)).unwrap(), "the owner is already in");
 }

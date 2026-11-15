@@ -3,8 +3,14 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
+use kiln_store::GitHubApp;
 
-#[derive(Debug, Clone)]
+pub const PUSH_SECRET: &str = "kiln-registry-push";
+pub const PULL_SECRET: &str = "kiln-registry-pull";
+const BUILDKIT_IMAGE: &str =
+    "moby/buildkit:v0.26.0-rootless@sha256:2846ca21f8cadf9c949ab0c04cfe3619e111d6c527f4194d6e5b098abf6aeaff";
+
+#[derive(Clone)]
 pub struct Settings {
     pub listen: SocketAddr,
     pub public_url: String,
@@ -16,13 +22,12 @@ pub struct Settings {
     pub webhook_secrets: Vec<String>,
     pub oauth_client_id: String,
     pub oauth_client_secret: String,
-    pub allowed_users: Vec<u64>,
     pub owners: Vec<String>,
     pub include_public: bool,
     pub registry: String,
     pub registry_url: String,
     pub registry_username: String,
-    pub registry_password: String,
+    pub registry_password: Option<String>,
     pub slots: usize,
     pub poll_secs: u64,
     pub build_timeout_secs: u64,
@@ -41,14 +46,6 @@ fn var(name: &str) -> Option<String> {
 
 fn required(name: &str) -> Result<String> {
     var(name).with_context(|| format!("{name} is required"))
-}
-
-fn secret(name: &str) -> Result<String> {
-    let file = format!("{name}_FILE");
-    if let Some(path) = var(&file) {
-        return Ok(std::fs::read_to_string(&path).with_context(|| format!("reading {file}={path}"))?.trim().to_owned());
-    }
-    var(name).with_context(|| format!("{name} or {file} is required"))
 }
 
 fn list(name: &str) -> Vec<String> {
@@ -100,55 +97,53 @@ fn labels(name: &str) -> Result<BTreeMap<String, String>> {
 }
 
 impl Settings {
-    pub fn github_configured() -> bool {
-        var("KILN_APP_ID").is_some()
-    }
-
     pub fn listen() -> Result<SocketAddr> {
         var("KILN_LISTEN").unwrap_or_else(|| "0.0.0.0:8080".into()).parse().context("KILN_LISTEN")
     }
 
-    pub fn public_url() -> Option<String> {
-        var("KILN_PUBLIC_URL").and_then(|value| origin("KILN_PUBLIC_URL", &value).ok())
+    pub fn public_url() -> Result<String> {
+        origin("KILN_PUBLIC_URL", &required("KILN_PUBLIC_URL")?)
     }
 
-    pub fn from_env() -> Result<Self> {
-        let public_url = origin("KILN_PUBLIC_URL", &required("KILN_PUBLIC_URL")?)?;
-        let registry = required("KILN_REGISTRY")?.trim_end_matches('/').to_owned();
+    pub fn data_dir() -> PathBuf {
+        PathBuf::from(var("KILN_DATA_DIR").unwrap_or_else(|| "/data".into()))
+    }
+
+    pub fn github_api() -> String {
+        var("KILN_GITHUB_API").unwrap_or_else(|| "https://api.github.com".into())
+    }
+
+    pub fn github_web() -> String {
+        var("KILN_GITHUB_WEB").unwrap_or_else(|| "https://github.com".into())
+    }
+
+    pub fn from_env(app: &GitHubApp) -> Result<Self> {
+        let public_url = Self::public_url()?;
+        let registry = var("KILN_REGISTRY")
+            .unwrap_or_else(|| format!("ghcr.io/{}", app.owner_login.to_ascii_lowercase()))
+            .trim_end_matches('/')
+            .to_owned();
         if registry.contains("://") || !registry.contains('/') {
             bail!("KILN_REGISTRY is a registry and namespace without a scheme, like ghcr.io/example; got {registry:?}");
         }
         let registry_host = registry.split('/').next().unwrap_or_default().to_owned();
-        let github_api = var("KILN_GITHUB_API").unwrap_or_else(|| "https://api.github.com".into());
-        let allowed_users = list("KILN_ALLOWED_USER_IDS")
-            .into_iter()
-            .map(|id| id.parse::<u64>().with_context(|| format!("KILN_ALLOWED_USER_IDS has a non-numeric id {id:?}")))
-            .collect::<Result<Vec<_>>>()?;
-        if allowed_users.is_empty() {
-            bail!("KILN_ALLOWED_USER_IDS must list at least one numeric GitHub user id");
-        }
-        let owners = list("KILN_OWNERS");
-        if owners.is_empty() {
-            bail!("KILN_OWNERS must list the GitHub accounts whose repositories Kiln builds");
-        }
-        let mut webhook_secrets = vec![secret("KILN_WEBHOOK_SECRET")?];
-        if var("KILN_WEBHOOK_SECRET_PREVIOUS").is_some() || var("KILN_WEBHOOK_SECRET_PREVIOUS_FILE").is_some() {
-            webhook_secrets.push(secret("KILN_WEBHOOK_SECRET_PREVIOUS")?);
-        }
+        let github_api = Self::github_api();
+        let registry_password = app.registry_token.clone();
         let runner = kiln_runner::Settings {
             namespace: var("KILN_BUILD_NAMESPACE").unwrap_or_else(|| "kiln-builds".into()),
             kiln_image: required("KILN_IMAGE")?,
-            buildkit_image: required("KILN_BUILDKIT_IMAGE")?,
-            buildkit_args: list("KILN_BUILDKIT_ARGS"),
-            buildkit_rootless: var("KILN_BUILDKIT_ROOTLESS").is_none_or(|v| v != "false"),
+            buildkit_image: var("KILN_BUILDKIT_IMAGE").unwrap_or_else(|| BUILDKIT_IMAGE.into()),
+            buildkit_args: match var("KILN_BUILDKIT_ARGS") {
+                Some(_) => list("KILN_BUILDKIT_ARGS"),
+                None => vec!["--oci-worker-no-process-sandbox".into()],
+            },
             registry: registry.clone(),
             registry_url: var("KILN_REGISTRY_URL").unwrap_or_else(|| format!("https://{registry_host}")),
             github_api: github_api.clone(),
-            pull_secret: var("KILN_PULL_SECRET"),
-            push_secret: var("KILN_PUSH_SECRET").unwrap_or_else(|| "kiln-registry-push".into()),
+            pull_secret: registry_password.is_some().then(|| PULL_SECRET.to_owned()),
+            push_secret: PUSH_SECRET.into(),
             priority_class: var("KILN_PRIORITY_CLASS"),
             sandbox_runtime_class: var("KILN_SANDBOX_RUNTIME_CLASS"),
-            user_namespaces: var("KILN_USER_NAMESPACES").is_none_or(|v| v != "false"),
             avoid_labels: labels("KILN_AVOID_POD_LABELS")?,
             avoid_namespace: var("KILN_AVOID_POD_NAMESPACE"),
             workspace_size: quantity("KILN_WORKSPACE_SIZE", "8Gi")?,
@@ -157,29 +152,26 @@ impl Settings {
             default_memory: quantity("KILN_DEFAULT_MEMORY", "2Gi")?,
             memory_limit_factor: number("KILN_MEMORY_LIMIT_FACTOR", 2)?.max(1),
         };
-        if !runner.buildkit_rootless && !runner.user_namespaces {
-            bail!(
-                "KILN_BUILDKIT_ROOTLESS=false needs KILN_USER_NAMESPACES=true, otherwise BuildKit would run as root on the node"
-            );
-        }
         Ok(Self {
             listen: Self::listen()?,
             public_url,
-            data_dir: PathBuf::from(var("KILN_DATA_DIR").unwrap_or_else(|| "/data".into())),
-            github_web: var("KILN_GITHUB_WEB").unwrap_or_else(|| "https://github.com".into()),
+            data_dir: Self::data_dir(),
+            github_web: Self::github_web(),
             github_api,
-            app_id: required("KILN_APP_ID")?.parse().context("KILN_APP_ID must be a number")?,
-            app_key: secret("KILN_APP_PRIVATE_KEY")?.into_bytes(),
-            webhook_secrets,
-            oauth_client_id: required("KILN_OAUTH_CLIENT_ID")?,
-            oauth_client_secret: secret("KILN_OAUTH_CLIENT_SECRET")?,
-            allowed_users,
-            owners,
+            app_id: app.app_id as u64,
+            app_key: app.private_key.clone().into_bytes(),
+            webhook_secrets: vec![app.webhook_secret.clone()],
+            oauth_client_id: app.client_id.clone(),
+            oauth_client_secret: app.client_secret.clone(),
+            owners: vec![app.owner_login.clone()],
             include_public: var("KILN_INCLUDE_PUBLIC").is_some_and(|v| v == "true"),
             registry_url: runner.registry_url.clone(),
             registry,
-            registry_username: var("KILN_REGISTRY_USERNAME").unwrap_or_else(|| "kiln".into()),
-            registry_password: secret("KILN_REGISTRY_PASSWORD")?,
+            registry_username: app
+                .registry_username
+                .clone()
+                .unwrap_or_else(|| if app.owner_is_user { app.owner_login.clone() } else { String::new() }),
+            registry_password,
             slots: number("KILN_SLOTS", 2)?.max(1),
             poll_secs: number("KILN_POLL_SECONDS", 60)?.max(15),
             build_timeout_secs: number("KILN_BUILD_TIMEOUT_SECONDS", 1800)?.clamp(60, 7200),
@@ -210,13 +202,12 @@ impl Settings {
             webhook_secrets: Vec::new(),
             oauth_client_id: String::new(),
             oauth_client_secret: String::new(),
-            allowed_users: Vec::new(),
             owners: vec!["kiln-demo".into()],
             include_public: false,
             registry: runner.registry.clone(),
             registry_url: runner.registry_url.clone(),
-            registry_username: String::new(),
-            registry_password: String::new(),
+            registry_username: "kiln-demo".into(),
+            registry_password: Some("demo".into()),
             slots: 2,
             poll_secs: 15,
             build_timeout_secs: 1800,

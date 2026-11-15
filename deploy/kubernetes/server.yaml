@@ -47,7 +47,7 @@ spec:
                     operator: DoesNotExist
       containers:
         - name: kiln
-          image: ghcr.io/mikaelhug/kiln:0.1.3@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: ghcr.io/mikaelhug/kiln:0.2.0@sha256:0000000000000000000000000000000000000000000000000000000000000000
           args: [serve]
           ports:
             - name: http
@@ -55,15 +55,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: kiln
-          env:
-            - name: KILN_APP_PRIVATE_KEY_FILE
-              value: /run/secrets/kiln/app-private-key
-            - name: KILN_WEBHOOK_SECRET_FILE
-              value: /run/secrets/kiln/webhook-secret
-            - name: KILN_OAUTH_CLIENT_SECRET_FILE
-              value: /run/secrets/kiln/oauth-client-secret
-            - name: KILN_REGISTRY_PASSWORD_FILE
-              value: /run/secrets/kiln/registry-password
           readinessProbe:
             httpGet:
               path: /readyz
@@ -90,20 +81,12 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-            - name: secrets
-              mountPath: /run/secrets/kiln
-              readOnly: true
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: kiln-data
-        - name: secrets
-          secret:
-            secretName: kiln
-            defaultMode: 0440
-            optional: true
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi
