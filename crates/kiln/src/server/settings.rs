@@ -147,6 +147,7 @@ impl Settings {
             pull_secret: var("KILN_PULL_SECRET"),
             push_secret: var("KILN_PUSH_SECRET").unwrap_or_else(|| "kiln-registry-push".into()),
             priority_class: var("KILN_PRIORITY_CLASS"),
+            sandbox_runtime_class: var("KILN_SANDBOX_RUNTIME_CLASS"),
             user_namespaces: var("KILN_USER_NAMESPACES").is_none_or(|v| v != "false"),
             avoid_labels: labels("KILN_AVOID_POD_LABELS")?,
             avoid_namespace: var("KILN_AVOID_POD_NAMESPACE"),

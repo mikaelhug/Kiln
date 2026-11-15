@@ -117,7 +117,7 @@ Copy it into your GitOps repository, replace `secrets.yaml` with the file `kiln 
 | `network-policies.yaml` | the namespace of your ingress controller (`traefik`) that may reach the server, and the API server addresses |
 | `build-policy.yaml` | the ResourceQuota: at least `KILN_SLOTS` times the requests of your largest build. Every test and verify job and `buildkitd` requests `KILN_DEFAULT_CPU` and `KILN_DEFAULT_MEMORY` unless a job sets its own |
 
-**The image.** Use the same release for the server image in `server.yaml` and for `KILN_IMAGE`, pinned by the digest from the release notes, for example `ghcr.io/mikaelhug/kiln:0.1.2@sha256:…`. The server and its in-pod helper speak a private protocol, so they must always match; upgrade both together.
+**The image.** Use the same release for the server image in `server.yaml` and for `KILN_IMAGE`, pinned by the digest from the release notes, for example `ghcr.io/mikaelhug/kiln:0.1.3@sha256:…`. The server and its in-pod helper speak a private protocol, so they must always match; upgrade both together.
 
 Encrypt `secrets.yaml` before committing it, for example with sops, and let your GitOps tool decrypt it. Without GitOps:
 
@@ -174,6 +174,7 @@ Values marked *file* can also be given as `<NAME>_FILE` pointing at a mounted se
 | `KILN_PULL_SECRET` | | image pull secret in the build namespace |
 | `KILN_PUSH_SECRET` | `kiln-registry-push` | Secret with `username` and `password` used by the push step |
 | `KILN_PRIORITY_CLASS` | | PriorityClass for build pods |
+| `KILN_SANDBOX_RUNTIME_CLASS` | | RuntimeClass, such as `gvisor`, for build pods that run no BuildKit: pull request builds |
 | `KILN_USER_NAMESPACES` | `true` | run build pods with `hostUsers: false` |
 | `KILN_AVOID_POD_LABELS` / `KILN_AVOID_POD_NAMESPACE` | | `key=value` labels and namespace of pods whose node builds avoid, e.g. the Kiln server |
 | `KILN_SLOTS` | `2` | builds that run at the same time |
@@ -210,7 +211,7 @@ Kiln writes a copy of its database to `kiln.backup.db` in the data directory eve
 ## 8. Try it without a cluster
 
 ```bash
-docker run --rm -p 8080:8080 ghcr.io/mikaelhug/kiln:0.1.2 demo --bind 0.0.0.0
+docker run --rm -p 8080:8080 ghcr.io/mikaelhug/kiln:0.1.3 demo --bind 0.0.0.0
 ```
 
 The demo runs the real engine and UI against simulated repositories, builds and logs. It starts with a few days of build history and pushes a new commit every minute or so. Nothing outside your machine is contacted.

@@ -1583,7 +1583,7 @@ dependencies = [
 
 [[package]]
 name = "kiln"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -1620,7 +1620,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "base64 0.23.1",
  "indexmap",
@@ -1635,7 +1635,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-github"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -1652,7 +1652,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-registry"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "base64 0.23.1",
  "hex",
@@ -1668,7 +1668,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-runner"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hex",
  "k8s-openapi",
@@ -1681,7 +1681,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-store"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "rusqlite",
  "serde",

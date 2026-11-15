@@ -4,6 +4,10 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+## 0.1.3
+
+- `KILN_SANDBOX_RUNTIME_CLASS` runs pull request builds under a sandboxed runtime class such as gVisor. Builds that run BuildKit keep the default runtime, because BuildKit cannot run inside gVisor.
+
 ## 0.1.2
 
 - Kiln starts without a GitHub App and shows a Connect GitHub page until `KILN_APP_ID` is set, so it can be deployed before the app exists.

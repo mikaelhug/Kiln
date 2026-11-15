@@ -27,6 +27,7 @@ pub struct Settings {
     pub pull_secret: Option<String>,
     pub push_secret: String,
     pub priority_class: Option<String>,
+    pub sandbox_runtime_class: Option<String>,
     pub user_namespaces: bool,
     pub avoid_labels: BTreeMap<String, String>,
     pub avoid_namespace: Option<String>,
@@ -53,6 +54,7 @@ impl Settings {
             pull_secret: Some("registry-pull".into()),
             push_secret: "registry-push".into(),
             priority_class: Some("kiln-build".into()),
+            sandbox_runtime_class: Some("gvisor".into()),
             user_namespaces: true,
             avoid_labels: BTreeMap::from([("app.kubernetes.io/name".into(), "kiln".into())]),
             avoid_namespace: Some("kiln".into()),
@@ -532,6 +534,10 @@ impl Builder<'_> {
         }
         if let Some(class) = &self.settings.priority_class {
             spec["priorityClassName"] = json!(class);
+        }
+        let builds_images = self.init.iter().any(|c| c["name"] == "buildkitd");
+        if let Some(class) = self.settings.sandbox_runtime_class.as_ref().filter(|_| !builds_images) {
+            spec["runtimeClassName"] = json!(class);
         }
         if let Some(secret) = &self.settings.pull_secret {
             spec["imagePullSecrets"] = json!([{ "name": secret }]);

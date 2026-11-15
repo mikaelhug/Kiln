@@ -70,6 +70,7 @@ fn credentials_stay_in_the_containers_that_need_them() {
     let spec = rendered.pod.spec.clone().unwrap();
     assert_eq!(spec.automount_service_account_token, Some(false));
     assert_eq!(spec.host_users, Some(false));
+    assert_eq!(spec.runtime_class_name, None, "BuildKit cannot run in the sandbox runtime");
 
     for container in containers(&rendered.pod) {
         let name = container.name.as_str();
@@ -111,6 +112,7 @@ fn pull_requests_get_no_secrets_no_builder_and_their_own_cache() {
     let rendered = render(&plan(&config, Scope::TestsOnly, false), &settings).unwrap();
     let names: Vec<String> = containers(&rendered.pod).into_iter().map(|c| c.name).collect();
     assert_eq!(names, ["fetch", "test-unit", "done"]);
+    assert_eq!(rendered.pod.spec.as_ref().unwrap().runtime_class_name.as_deref(), Some("gvisor"));
     for container in containers(&rendered.pod) {
         let secrets = env_secret_names(&container);
         assert!(secrets.is_empty(), "{} reads secrets {secrets:?}", container.name);
