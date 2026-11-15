@@ -622,7 +622,7 @@ body[data-page="build"] .pipeline .status.run::before { content: none; }
 @media (min-width: 1001px) {
   .log-head .name span, .log-head .meta .t { display: none; }
 }
-.resources .card-head { gap: 8px; }
+.resources .card-head { gap: 8px; border-bottom: none; min-height: 0; padding-bottom: 6px; }
 .resources .card-head h2 { flex: 1; }
 .resources > .progress { margin: 0 16px 12px; max-width: none; }
 .metrics { display: grid; gap: 14px; padding: 0 16px 12px; }
