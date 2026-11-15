@@ -2,6 +2,7 @@ FROM rust:1.99.1-alpine AS build
 RUN apk add --no-cache musl-dev gcc g++ make cmake clang perl linux-headers ca-certificates
 WORKDIR /src
 COPY . .
+ARG KILN_BUILT_IMAGE
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p kiln \

@@ -26,12 +26,12 @@ There are no secrets to prepare: Kiln creates its GitHub App and keeps its crede
 
 | File | What to set |
 |---|---|
-| `config.yaml` | `KILN_PUBLIC_URL` and `KILN_IMAGE` |
+| `config.yaml` | `KILN_PUBLIC_URL` |
 | `server.yaml` | the image, the `HTTPRoute` parent (`traefik/public`) and hostname; use an `Ingress` instead if you have no Gateway API |
 | `network-policies.yaml` | the namespace of your ingress controller (`traefik`) that may reach the server, and the API server addresses |
 | `build-policy.yaml` | the ResourceQuota: at least `KILN_SLOTS` times the requests of your largest build |
 
-**The image.** Use the same release for the server image in `server.yaml` and for `KILN_IMAGE`, pinned by the digest from the release notes, for example `ghcr.io/mikaelhug/kiln:0.2.1@sha256:…`. The server and its in-pod helper speak a private protocol, so they must always match; upgrade both together. Every push to Kiln's `main` also publishes `X.Y.(Z+1)-rc.N`; image automation with a policy such as `>=0.0.0-0` can set both to the latest build.
+**The image.** Pin the server image in `server.yaml` to a release by its digest from the release notes, for example `ghcr.io/mikaelhug/kiln:0.2.1@sha256:…`. Build pods run the same image for Kiln's helper, so the server and helper always match. Every push to Kiln's `main` also publishes `X.Y.(Z+1)-rc.N`, which image automation with a policy such as `>=0.0.0-0` can follow.
 
 **The API server addresses.** Network policies see the address after DNAT, so allow both the service address and the API server's real address. Replace `10.96.0.1` and `192.0.2.10:6443` in `network-policies.yaml` with what these print:
 
@@ -93,12 +93,12 @@ Each repository gets a `ReadWriteOnce` cache claim, created on demand. A build o
 
 ## 6. Configuration reference
 
-Only `KILN_PUBLIC_URL` and `KILN_IMAGE` are required. Lists are comma-separated.
+Only `KILN_PUBLIC_URL` is required. Lists are comma-separated.
 
 | Variable | Default | |
 |---|---|---|
 | `KILN_PUBLIC_URL` | required | https origin of the UI, without a path |
-| `KILN_IMAGE` | required | Kiln's own image for the in-pod helper, pinned by digest, same release as the server |
+| `KILN_IMAGE` | the image this release was built as | Kiln's own image for the in-pod helper; set it only when you mirror the image |
 | `KILN_REGISTRY` | `ghcr.io/<GitHub account>` | registry and namespace images are published to |
 | `KILN_REGISTRY_URL` | `https://<registry host>` | |
 | `KILN_INCLUDE_PUBLIC` | `false` | also build public repositories |
@@ -134,7 +134,7 @@ Only `KILN_PUBLIC_URL` and `KILN_IMAGE` are required. Lists are comma-separated.
 | The GitHub App was deleted or its key revoked | **Settings › GitHub › Disconnect**, then connect again. People and history stay. If nobody can sign in, delete Kiln's data volume instead. |
 | The database is lost | Kiln shows **Connect GitHub** again; connect a new app and delete the old one on GitHub. Version numbers continue from the registry; only history is lost. |
 | A release failed with "semver tags are immutable" | Someone or something already published that version with a different image. Release a new version. |
-| Upgrade Kiln | Change the server image and `KILN_IMAGE` to the new release together, ideally while no build runs. |
+| Upgrade Kiln | Change the server image to the new release, ideally while no build runs. |
 | Stop all builds for a repository | **Pause builds** in the repository's menu. |
 | A repository shows "Published outside Kiln" | Every hour Kiln compares the registry's semver tags with what it released. Another CI still publishing, or someone using the registry credential, shows up here. Find the source, then **Dismiss**. |
 

@@ -131,7 +131,9 @@ impl Settings {
         let registry_password = app.registry_token.clone();
         let runner = kiln_runner::Settings {
             namespace: var("KILN_BUILD_NAMESPACE").unwrap_or_else(|| "kiln-builds".into()),
-            kiln_image: required("KILN_IMAGE")?,
+            kiln_image: var("KILN_IMAGE")
+                .or_else(|| option_env!("KILN_BUILT_IMAGE").map(str::to_owned))
+                .context("KILN_IMAGE is required when Kiln is not built by its release workflow")?,
             buildkit_image: var("KILN_BUILDKIT_IMAGE").unwrap_or_else(|| BUILDKIT_IMAGE.into()),
             buildkit_args: match var("KILN_BUILDKIT_ARGS") {
                 Some(_) => list("KILN_BUILDKIT_ARGS"),
