@@ -4,6 +4,10 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+- Every push to `main` publishes a tested `X.Y.(Z+1)-rc.N` image, so image automation can follow the latest Kiln.
+- A service that stops or never opens its `port` fails the build instead of waiting for the timeout.
+- `services.port` must be 1 to 65535.
+
 ## 0.2.1
 
 - Live updates stop within seconds for someone who is removed or signed out.

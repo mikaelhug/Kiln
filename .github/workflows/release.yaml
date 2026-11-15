@@ -17,7 +17,11 @@ env:
   DOCKER_BUILD_RECORD_UPLOAD: false
 
 jobs:
+  check:
+    uses: ./.github/workflows/ci.yaml
+
   version:
+    needs: check
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -31,7 +35,10 @@ jobs:
             fi
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           else
-            echo "version=main" >> "$GITHUB_OUTPUT"
+            base=$(git ls-remote --tags --refs "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" 'v*' \
+              | sed 's#.*refs/tags/v##' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+            IFS=. read -r major minor patch <<< "${base:-0.0.0}"
+            echo "version=$major.$minor.$((patch + 1))-rc.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
           fi
 
   linux:
@@ -52,7 +59,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
-        if: github.ref_type == 'tag'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -62,7 +68,7 @@ jobs:
         with:
           context: .
           platforms: linux/${{ matrix.arch }}
-          outputs: ${{ github.ref_type == 'tag' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=cacheonly' }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -81,9 +87,7 @@ jobs:
           mkdir -p out
           cp LICENSE-MIT LICENSE-APACHE README.md dist/
           tar -C dist -czf "out/kiln-${{ needs.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz" kiln LICENSE-MIT LICENSE-APACHE README.md
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            echo "${{ steps.build.outputs.digest }}" > "out/digest-${{ matrix.arch }}"
-          fi
+          echo "${{ steps.build.outputs.digest }}" > "out/digest-${{ matrix.arch }}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: linux-${{ matrix.arch }}
@@ -110,7 +114,6 @@ jobs:
           retention-days: 7
 
   publish:
-    if: github.ref_type == 'tag'
     needs: [version, linux, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -146,6 +149,7 @@ jobs:
           subject-digest: ${{ steps.manifest.outputs.digest }}
           push-to-registry: true
       - name: Create the GitHub release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

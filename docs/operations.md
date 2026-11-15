@@ -31,7 +31,7 @@ There are no secrets to prepare: Kiln creates its GitHub App and keeps its crede
 | `network-policies.yaml` | the namespace of your ingress controller (`traefik`) that may reach the server, and the API server addresses |
 | `build-policy.yaml` | the ResourceQuota: at least `KILN_SLOTS` times the requests of your largest build |
 
-**The image.** Use the same release for the server image in `server.yaml` and for `KILN_IMAGE`, pinned by the digest from the release notes, for example `ghcr.io/mikaelhug/kiln:0.2.1@sha256:…`. The server and its in-pod helper speak a private protocol, so they must always match; upgrade both together.
+**The image.** Use the same release for the server image in `server.yaml` and for `KILN_IMAGE`, pinned by the digest from the release notes, for example `ghcr.io/mikaelhug/kiln:0.2.1@sha256:…`. The server and its in-pod helper speak a private protocol, so they must always match; upgrade both together. Every push to Kiln's `main` also publishes `X.Y.(Z+1)-rc.N`; image automation with a policy such as `>=0.0.0-0` and digest reflection can set both to the latest build.
 
 **The API server addresses.** Network policies see the address after DNAT, so allow both the service address and the API server's real address. Replace `10.96.0.1` and `192.0.2.10:6443` in `network-policies.yaml` with what these print:
 
