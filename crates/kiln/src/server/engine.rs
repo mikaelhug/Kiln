@@ -761,16 +761,6 @@ impl<P: Platform> Engine<P> {
         let claim = cache_claim_name(&repo.full_name());
         self.platform.ensure_cache(&claim).await?;
         let repo_secret = self.settings.repo_secret(&repo.full_name());
-        let quiet_nodes = match self.platform.quiet_nodes().await {
-            Ok(nodes) => nodes,
-            Err(error) => {
-                tracing::debug!(
-                    error = format!("{error:#}"),
-                    "reading node load failed; leaving placement to the scheduler"
-                );
-                Vec::new()
-            }
-        };
         let plan = Plan {
             build_id: build.id,
             attempt: build.attempt,
@@ -787,7 +777,6 @@ impl<P: Platform> Engine<P> {
             repo_secret: Some(&repo_secret),
             cache_claim: Some(&claim),
             timeout_secs: self.settings.build_timeout_secs,
-            quiet_nodes: &quiet_nodes,
         };
         let rendered = kiln_runner::render(&plan, &self.settings.runner).map_err(Refusal::config)?;
         self.store.replace_tasks(build.id, build.attempt, &rendered.tasks)?;

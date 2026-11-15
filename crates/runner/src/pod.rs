@@ -86,7 +86,6 @@ pub struct Plan<'a> {
     pub repo_secret: Option<&'a str>,
     pub cache_claim: Option<&'a str>,
     pub timeout_secs: u64,
-    pub quiet_nodes: &'a [String],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -502,21 +501,6 @@ impl Builder<'_> {
                 "podAffinityTerm": { "topologyKey": "kubernetes.io/hostname", "labelSelector": { "matchLabels": { MANAGED_BY: "kiln" } } },
             }] },
         });
-        let preferred: Vec<Value> = self
-            .plan
-            .quiet_nodes
-            .iter()
-            .take(3)
-            .zip([100, 60, 30])
-            .map(|(node, weight)| {
-                json!({ "weight": weight, "preference": { "matchExpressions": [
-                    { "key": "kubernetes.io/hostname", "operator": "In", "values": [node] }
-                ] } })
-            })
-            .collect();
-        if !preferred.is_empty() {
-            affinity["nodeAffinity"]["preferredDuringSchedulingIgnoredDuringExecution"] = json!(preferred);
-        }
         if !self.settings.avoid_labels.is_empty() {
             let mut term = json!({ "topologyKey": "kubernetes.io/hostname", "labelSelector": { "matchLabels": self.settings.avoid_labels } });
             if let Some(namespace) = &self.settings.avoid_namespace {
@@ -608,38 +592,17 @@ fn split_quantity(quantity: &str) -> Option<(f64, &str)> {
     Some((number.parse::<f64>().ok()?, unit))
 }
 
-pub fn quantity_value(quantity: &str) -> f64 {
+fn quantity_value(quantity: &str) -> f64 {
     let Some((number, unit)) = split_quantity(quantity) else { return 0.0 };
     let scale = match unit {
         "" => 1.0,
-        "n" => 1e-9,
-        "u" => 1e-6,
         "m" => 0.001,
-        "k" => 1e3,
-        "M" => 1e6,
-        "G" => 1e9,
         "Ki" => 1024.0,
         "Mi" => 1024.0 * 1024.0,
         "Gi" => 1024.0 * 1024.0 * 1024.0,
         _ => 0.0,
     };
     number * scale
-}
-
-pub struct NodeLoad {
-    pub name: String,
-    pub cpu_used: f64,
-    pub cpu_allocatable: f64,
-    pub memory_used: f64,
-    pub memory_allocatable: f64,
-}
-
-pub fn quietest(nodes: &[NodeLoad]) -> Vec<String> {
-    let busy = |n: &NodeLoad| (n.cpu_used / n.cpu_allocatable).max(n.memory_used / n.memory_allocatable);
-    let mut usable: Vec<&NodeLoad> =
-        nodes.iter().filter(|n| n.cpu_allocatable > 0.0 && n.memory_allocatable > 0.0).collect();
-    usable.sort_by(|a, b| busy(a).partial_cmp(&busy(b)).unwrap_or(std::cmp::Ordering::Equal));
-    usable.into_iter().map(|n| n.name.clone()).collect()
 }
 
 fn scale_quantity(quantity: &str, factor: u32) -> Option<String> {
@@ -650,25 +613,7 @@ fn scale_quantity(quantity: &str, factor: u32) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeLoad, quantity_value, quietest, scale_quantity};
-
-    #[test]
-    fn builds_prefer_the_node_with_the_most_headroom_in_cpu_or_memory() {
-        let node = |name: &str, cpu: &str, memory: &str, memory_total: &str| NodeLoad {
-            name: name.into(),
-            cpu_used: quantity_value(cpu),
-            cpu_allocatable: 3.95,
-            memory_used: quantity_value(memory),
-            memory_allocatable: quantity_value(memory_total),
-        };
-        let nodes = [
-            node("busy-cpu", "3813m", "2Gi", "15Gi"),
-            node("busy-memory", "300m", "6Gi", "7Gi"),
-            node("quiet", "400000000n", "1048576Ki", "11Gi"),
-            node("idle", "250m", "1Gi", "7Gi"),
-        ];
-        assert_eq!(quietest(&nodes), ["quiet", "idle", "busy-memory", "busy-cpu"]);
-    }
+    use super::scale_quantity;
 
     #[test]
     fn memory_limits_scale_whole_and_fractional_quantities() {

@@ -40,7 +40,6 @@ fn plan<'a>(config: &'a Config, scope: Scope, trusted: bool) -> Plan<'a> {
         repo_secret: Some("kiln-repo-o-web"),
         cache_claim: Some("kiln-cache-o-web"),
         timeout_secs: 1800,
-        quiet_nodes: &[],
     }
 }
 

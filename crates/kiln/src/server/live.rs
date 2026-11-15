@@ -5,10 +5,10 @@ use futures::stream::BoxStream;
 use futures::{AsyncReadExt, StreamExt};
 use kiln_github::{CheckRun, Client, Compare, Conditional, Head, PullRequest, TagRef, Token};
 use kiln_registry::{Promotion, Registry};
-use kiln_runner::k8s_openapi::api::core::v1::{Node, PersistentVolumeClaim, Pod, Secret};
-use kiln_runner::{BUILD_LABEL, MANAGED_BY, NodeLoad, quantity_value, quietest};
+use kiln_runner::k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod, Secret};
+use kiln_runner::{BUILD_LABEL, MANAGED_BY};
 use kiln_store::Repo;
-use kube::api::{ApiResource, DeleteParams, DynamicObject, GroupVersionKind, ListParams, LogParams, PostParams};
+use kube::api::{DeleteParams, ListParams, LogParams, PostParams};
 use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Api, ResourceExt};
 
@@ -19,8 +19,6 @@ pub struct Live {
     github: Client,
     registry: Registry,
     pods: Api<Pod>,
-    nodes: Api<Node>,
-    node_metrics: Api<DynamicObject>,
     secrets: Api<Secret>,
     claims: Api<PersistentVolumeClaim>,
     cache_class: Option<String>,
@@ -77,14 +75,6 @@ impl Live {
             github,
             registry,
             pods: Api::namespaced(kube.clone(), namespace),
-            nodes: Api::all(kube.clone()),
-            node_metrics: Api::all_with(
-                kube.clone(),
-                &ApiResource::from_gvk_with_plural(
-                    &GroupVersionKind::gvk("metrics.k8s.io", "v1beta1", "NodeMetrics"),
-                    "nodes",
-                ),
-            ),
             secrets: Api::namespaced(kube.clone(), namespace),
             claims: Api::namespaced(kube, namespace),
             cache_class: settings.cache_class.clone(),
@@ -273,46 +263,6 @@ impl Platform for Live {
             Err(error) if is_status(&error, 404) => Ok(()),
             Err(error) => Err(error.into()),
         }
-    }
-
-    async fn quiet_nodes(&self) -> Result<Vec<String>> {
-        let nodes = self.nodes.list(&ListParams::default()).await.context("listing nodes")?;
-        let metrics = self.node_metrics.list(&ListParams::default()).await.context("reading node metrics")?;
-        let usage: BTreeMap<String, (f64, f64)> = metrics
-            .items
-            .iter()
-            .map(|m| {
-                let read = |key: &str| m.data["usage"][key].as_str().map(quantity_value).unwrap_or_default();
-                (m.name_any(), (read("cpu"), read("memory")))
-            })
-            .collect();
-        let loads: Vec<NodeLoad> = nodes
-            .items
-            .iter()
-            .filter(|node| {
-                let spec = node.spec.clone().unwrap_or_default();
-                let ready = node
-                    .status
-                    .as_ref()
-                    .and_then(|s| s.conditions.as_ref())
-                    .is_some_and(|conditions| conditions.iter().any(|c| c.type_ == "Ready" && c.status == "True"));
-                ready
-                    && !spec.unschedulable.unwrap_or(false)
-                    && !node.labels().contains_key("node-role.kubernetes.io/control-plane")
-            })
-            .filter_map(|node| {
-                let (cpu_used, memory_used) = *usage.get(&node.name_any())?;
-                let allocatable = node.status.as_ref()?.allocatable.as_ref()?;
-                Some(NodeLoad {
-                    name: node.name_any(),
-                    cpu_used,
-                    cpu_allocatable: quantity_value(&allocatable.get("cpu")?.0),
-                    memory_used,
-                    memory_allocatable: quantity_value(&allocatable.get("memory")?.0),
-                })
-            })
-            .collect();
-        Ok(quietest(&loads))
     }
 
     async fn create_pod(&self, pod: &Pod) -> Result<()> {
