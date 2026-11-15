@@ -417,7 +417,7 @@ pub fn resources_card(build: &Build, live: &Live) -> Markup {
                         span class="ref-text" { (last.and_then(|s| s.request).map(|r| format!(" · request {}", cores_text(r))).unwrap_or_default()) }
                     }
                     div class="meter" role="meter" aria-label="CPU in use" aria-valuemin="0" {
-                        span class="fill" {} span class="mark peak-mark" {} span class="mark ref-mark" {}
+                        span class="fill" {} span class="tick peak-tick" {} span class="tick ref-tick" {}
                     }
                     (chart())
                 }
@@ -431,7 +431,7 @@ pub fn resources_card(build: &Build, live: &Live) -> Markup {
                         span class="unit" { (last.and_then(|s| s.limit).map(|l| format!(" of {}", memory_text(l))).unwrap_or_default()) }
                     }
                     div class="meter" role="meter" aria-label="Memory in use" aria-valuemin="0" {
-                        span class="fill" {} span class="mark peak-mark" {}
+                        span class="fill" {} span class="tick peak-tick" {}
                     }
                     (chart())
                 }

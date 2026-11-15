@@ -104,11 +104,11 @@ function drawResources(card) {
     const share = (value) => Math.min(value / scale, 1);
     const meter = metric.querySelector(".meter");
     meter.querySelector(".fill").style.transform = `scaleX(${share(last[index]).toFixed(4)})`;
-    meter.querySelector(".peak-mark").style.left = `${(share(peaks[index]) * 100).toFixed(2)}%`;
-    const refMark = meter.querySelector(".ref-mark");
-    if (refMark) {
-      refMark.hidden = !refs[index];
-      refMark.style.left = `${(share(refs[index]) * 100).toFixed(2)}%`;
+    meter.querySelector(".peak-tick").style.left = `${(share(peaks[index]) * 100).toFixed(2)}%`;
+    const refTick = meter.querySelector(".ref-tick");
+    if (refTick) {
+      refTick.hidden = !refs[index];
+      refTick.style.left = `${(share(refs[index]) * 100).toFixed(2)}%`;
     }
     meter.setAttribute("aria-valuemax", scale.toFixed(2));
     meter.setAttribute("aria-valuenow", last[index].toFixed(2));
