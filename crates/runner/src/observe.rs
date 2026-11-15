@@ -237,6 +237,8 @@ mod tests {
             peak_cpu_milli: None,
             peak_memory: None,
             memory_limit: None,
+            cached_steps: None,
+            total_steps: None,
             steps: Vec::new(),
         }
     }

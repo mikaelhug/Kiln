@@ -4,6 +4,14 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+- Each page receives only the events it shows, and bursts are grouped, so pages stay quiet and log lines arrive in batches.
+- The live meter uses metrics-server's own sample times, scales memory against the limit and shows a trend once there are enough samples. On the dashboard a running build has a thin progress line and the time left instead of a growing row; numbers and trend are on the build page. Nothing animates while idle.
+- Time left is estimated from each remaining task's usual time, and a build running long shows how far over it is.
+- Tasks and steps show how much faster or slower they were than usual, and each task has a timeline bar.
+- Queued builds count their wait up, and the Queued tile shows the median wait.
+- Repositories show a failure streak, and builds that passed after a retry are marked.
+- Image builds show how many BuildKit steps came from the cache.
+- Rows keep their place when the page updates: new builds fade in and a row flashes once when its state changes.
 - On wide screens the build page fits the window and only the log scrolls.
 - Running builds show a progress bar with the time left, estimated from the repository's recent builds, and live CPU and memory with a small trend. Each task keeps its peak CPU and memory against its limit, flagged when it came close.
 - Image builds that pull a base image from a registry no longer fail with "mkdir /home/user/.docker: read-only file system".

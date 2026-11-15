@@ -38,6 +38,7 @@ pub enum PodEvent {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContainerUsage {
+    pub at: i64,
     pub pod: String,
     pub container: String,
     pub cpu: f64,

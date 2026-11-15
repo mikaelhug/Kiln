@@ -238,6 +238,32 @@ pub fn trigger_pill(build: &Build) -> Markup {
     }
 }
 
+pub fn failure_streak(builds: &[Build]) -> Option<(i64, usize)> {
+    let streak: Vec<&Build> = builds
+        .iter()
+        .filter(|b| b.trigger != Trigger::PullRequest && b.state.is_finished())
+        .filter(|b| !matches!(b.state, BuildState::Cancelled | BuildState::Superseded | BuildState::Skipped))
+        .take_while(|b| matches!(b.state, BuildState::Failed | BuildState::Errored))
+        .collect();
+    (streak.len() >= 2).then(|| (streak.last().map(|b| b.number).unwrap_or_default(), streak.len()))
+}
+
+fn streak_pill(builds: &[Build]) -> Markup {
+    html! {
+        @if let Some((since, count)) = failure_streak(builds) {
+            span class="pill bad" title="Default-branch builds failing in a row" { (icon(Icon::Alert)) "Failing since #" (since) " · " (count) }
+        }
+    }
+}
+
+fn retry_pill(build: &Build) -> Markup {
+    html! {
+        @if build.state == BuildState::Succeeded && (build.attempt > 1 || build.rerun_of.is_some()) {
+            span class="pill warn" title="Passed after a retry; may be flaky" { (icon(Icon::Rerun)) "Retry" }
+        }
+    }
+}
+
 fn version_pill(build: &Build) -> Markup {
     match &build.version {
         Some(version) if released(build) => {
@@ -266,8 +292,55 @@ fn initial(name: &str) -> String {
 }
 
 pub struct Live {
-    pub estimate: Option<i64>,
+    pub finish: Option<i64>,
     pub samples: Vec<crate::server::usage::Sample>,
+}
+
+#[derive(Default)]
+pub struct Usual {
+    pub tasks: std::collections::HashMap<String, i64>,
+    pub steps: std::collections::HashMap<(String, String), i64>,
+}
+
+pub fn task_key(task: &Task) -> String {
+    format!("{}:{}", task.kind.as_str(), task.name)
+}
+
+impl Usual {
+    pub fn task(&self, task: &Task) -> Option<i64> {
+        self.tasks.get(&task_key(task)).copied()
+    }
+
+    pub fn step(&self, task: &Task, step: &str) -> Option<i64> {
+        self.steps.get(&(task_key(task), step.to_owned())).copied()
+    }
+}
+
+pub fn finish_estimate(tasks: &[Task], usual: &Usual, now: i64) -> Option<i64> {
+    let mut left = 0;
+    for task in tasks {
+        match task.state {
+            TaskState::Pending => left += usual.task(task)?,
+            TaskState::Running => left += (usual.task(task)? - (now - task.started_at.unwrap_or(now))).max(0),
+            _ => {}
+        }
+    }
+    Some(now + left)
+}
+
+pub fn delta(actual: Option<i64>, usual: Option<i64>) -> Markup {
+    let (Some(actual), Some(usual)) = (actual, usual) else { return html! {} };
+    let change = actual - usual;
+    if change.abs() < 10.max(usual / 4) {
+        return html! {};
+    }
+    html! {
+        @if change > 0 {
+            span class="delta slow" title={"Usually " (duration(usual))} { "+" (duration(change)) }
+        } @else {
+            span class="delta fast" title={"Usually " (duration(usual))} { "−" (duration(-change)) }
+        }
+    }
 }
 
 pub fn cpu_text(cores: f64) -> String {
@@ -279,21 +352,32 @@ pub fn memory_text(bytes: f64) -> String {
     if gib >= 1.0 { format!("{gib:.1} GiB") } else { format!("{:.0} MiB", bytes / (1024.0 * 1024.0)) }
 }
 
-pub fn live_meter(build: &Build, live: &Live) -> Markup {
-    let points: Vec<[f64; 2]> = live.samples.iter().map(|s| [s.cpu, s.memory]).collect();
+fn row_progress(build: &Build, live: &Live) -> Markup {
+    html! {
+        @if let (Some(started), Some(finish)) = (build.started_at, live.finish) {
+            span class="row-progress" data-since=(started) data-finish=(finish) aria-hidden="true" { span class="fill" {} }
+        }
+    }
+}
+
+pub fn live_card(build: &Build, live: &Live) -> Markup {
+    let points: Vec<[f64; 3]> = live.samples.iter().map(|s| [s.cpu, s.memory, s.limit.unwrap_or(0.0)]).collect();
     let last = live.samples.last();
     html! {
-        div class="live-meta" {
-            @if let Some(started) = build.started_at {
-                div class={"progress" @if live.estimate.is_none() { " unknown" }} data-since=(started) data-estimate=[live.estimate] {
-                    span class="fill" {}
-                }
+        div class="card live-card" {
+            @if let (Some(started), Some(finish)) = (build.started_at, live.finish) {
+                div class="progress" data-since=(started) data-finish=(finish) { span class="fill" {} }
                 span class="eta" data-eta {}
             }
             div class="usage" data-usage=(build.id) data-points=(serde_json::to_string(&points).unwrap_or_default()) {
-                span class="cpu" title="CPU in use" { i {} span class="v" { (last.map(|s| cpu_text(s.cpu)).unwrap_or_else(|| "– CPU".into())) } }
-                span class="mem" title="Memory in use" { i {} span class="v" { (last.map(|s| memory_text(s.memory)).unwrap_or_else(|| "– GiB".into())) } }
+                span class="cpu" title="CPU, averaged by metrics-server" { i {} span class="v" { (last.map(|s| cpu_text(s.cpu)).unwrap_or_else(|| "– CPU".into())) } }
+                span class="mem" title="Memory, averaged by metrics-server" {
+                    i {}
+                    span class="v" { (last.map(|s| memory_text(s.memory)).unwrap_or_else(|| "– GiB".into())) }
+                    span class="of" { (last.and_then(|s| s.limit).map(|l| format!(" of {}", memory_text(l))).unwrap_or_default()) }
+                }
                 svg class="trend" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true" {
+                    line class="limit" x1="0" y1="2" x2="100" y2="2" {}
                     polyline class="cpu" points="" {}
                     polyline class="mem" points="" {}
                 }
@@ -311,17 +395,21 @@ pub fn build_row_live(build: &Build, repo: Option<&Repo>, show_repo: bool, meter
     let live = build.state.is_active() || build.state == BuildState::Queued;
     let failed = kind(build.state) == "bad";
     html! {
-        li class=(if failed { "build-row failed" } else { "build-row" }) {
+        li id={"b-" (build.id)} data-state=(kind(build.state)) class=(if failed { "build-row failed" } else { "build-row" }) {
             (status(build.state, ""))
             div class="main" {
                 a class="title" href=(href) title=(commit_title(build)) { (commit_title(build)) }
-                @if let Some(meter) = meter.filter(|_| build.state.is_active()) { (live_meter(build, meter)) }
+
                 div class="sub" {
                     @if show_repo { @if let Some(repo) = repo { a href=(repo_path(repo)) { (repo.name) } } }
                     span { "#" (build.number) }
                     @if live || failed {
                         span class="sep" { "·" }
                         span class={"detail " (kind(build.state))} { (headline(build)) }
+                        @if build.state == BuildState::Queued {
+                            span class="sep" { "·" }
+                            span class="wait-time" data-started=(build.created_at) { (duration(kiln_github::unix_now() as i64 - build.created_at)) }
+                        }
                     } @else if let Some(actor) = &build.actor {
                         span class="sep" { "·" }
                         span { (actor) }
@@ -329,11 +417,12 @@ pub fn build_row_live(build: &Build, repo: Option<&Repo>, show_repo: bool, meter
                 }
             }
             div class="ref" { (trigger_pill(build)) span class="sha" { (build.short_sha()) } }
-            div class="version" { (version_pill(build)) }
+            div class="version" { (retry_pill(build)) (version_pill(build)) }
             div class="when" {
                 span class="duration" { (elapsed(build.started_at, build.finished_at)) }
-                (time(build.created_at))
+                @if build.state.is_active() && meter.and_then(|m| m.finish).is_some() { span class="eta" data-eta {} } @else { (time(build.created_at)) }
             }
+            @if let Some(meter) = meter.filter(|_| build.state.is_active()) { (row_progress(build, meter)) }
         }
     }
 }
@@ -620,6 +709,7 @@ pub struct Stats {
     pub recent: Vec<BuildState>,
     pub rate: Option<(usize, usize)>,
     pub median: Option<i64>,
+    pub median_wait: Option<i64>,
 }
 
 pub struct DashboardData {
@@ -672,22 +762,23 @@ pub fn dashboard_live(data: &DashboardData) -> Markup {
         div class="tiles" {
             div class="card tile" {
                 span class="label" { (icon(Icon::Gauge)) "Build slots" }
-                span class="value" { (data.active.len()) small { "of " (data.slots) " busy" } }
+                span class="value" data-value=(data.active.len()) { (data.active.len()) small { "of " (data.slots) " busy" } }
                 div class="meter" { @for slot in 0..data.slots { span class=(if slot < data.active.len() { "on" } else { "" }) {} } }
             }
             div class="card tile" {
                 span class="label" { (icon(Icon::Clock)) "Queued" }
-                span class="value" { (data.queued.len()) }
+                span class="value" data-value=(data.queued.len()) { (data.queued.len()) }
                 span class="foot" {
-                    @match data.queued.first() {
-                        Some(next) => { "Next: " @if let Some(r) = repo(next.repo_id) { (r.name) } " #" (next.number) },
-                        None => "Nothing is waiting",
+                    @match (data.queued.first(), stats.median_wait) {
+                        (Some(next), _) => { "Next: " @if let Some(r) = repo(next.repo_id) { (r.name) } " #" (next.number) },
+                        (None, Some(wait)) => { "Median wait " (duration(wait)) },
+                        (None, None) => "Nothing is waiting",
                     }
                 }
             }
             div class="card tile" {
                 span class="label" { (icon(Icon::Activity)) "Last 24 hours" }
-                span class="value" { (day_total) small { @if day_total == 1 { "build" } @else { "builds" } } }
+                span class="value" data-value=(day_total) { (day_total) small { @if day_total == 1 { "build" } @else { "builds" } } }
                 span class="foot" { (stats.passed_day) " passed · " (stats.failed_day) " failed" }
                 @let peak = stats.hours.iter().map(|(ok, bad)| ok + bad).max().unwrap_or(0).max(1);
                 div class="spark" aria-hidden="true" {
@@ -824,6 +915,7 @@ pub fn repos_live(rows: &[RepoRow]) -> Markup {
                                                     span { (repo.owner) }
                                                 }
                                                 @if repo.paused { span class="pill warn" { (icon(Icon::Pause)) "Paused" } }
+                                                (streak_pill(&row.recent))
                                                 @if repo.config_error.is_some() { span class="pill bad" { "Config error" } }
                                                 @if repo.drift.is_some() { span class="pill warn" { (icon(Icon::Alert)) "Registry" } }
                                             }
@@ -997,6 +1089,7 @@ pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
                         h1 { (repo.name) }
                         div class="chips" {
                             span class="pill" { (icon(Icon::Branch)) (repo.default_branch) }
+                            (streak_pill(&data.history))
                             @if let Some(head) = &repo.head_sha { a class="mono" href={(github) "/commit/" (head)} target="_blank" rel="noopener" { (icon(Icon::Commit)) (&head[..head.len().min(7)]) } }
                             a href=(github) target="_blank" rel="noopener" { (PreEscaped(GITHUB)) "GitHub" (icon(Icon::External)) }
                         }
@@ -1187,6 +1280,7 @@ fn triggers(on: &config::Triggers) -> String {
 }
 
 pub struct BuildData {
+    pub usual: Usual,
     pub live: Option<Live>,
     pub ahead: Option<usize>,
     pub repo: Repo,
@@ -1281,6 +1375,7 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                             a href=(trigger_url(ctx, repo, build)) target="_blank" rel="noopener" { (trigger_pill(build)) }
                             a class="mono" href=(commit_url) target="_blank" rel="noopener" title="Open the commit on GitHub" { (icon(Icon::Commit)) (build.short_sha()) }
                             (version_pill(build))
+                            (retry_pill(build))
                             @if let Some(actor) = &build.actor { span { (icon(Icon::User)) (actor) } }
                             span { (icon(Icon::Clock)) (time(build.created_at)) }
                             @if build.started_at.is_some() { span { (icon(Icon::Timer)) (elapsed(build.started_at, build.finished_at)) } }
@@ -1302,7 +1397,7 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                 }
             }
         }
-        @if let Some(live) = &data.live { div class="card live-card" { (live_meter(build, live)) } }
+        @if let Some(live) = &data.live { (live_card(build, live)) }
         (pipeline(data))
         (banner(build, data.ahead))
     }
@@ -1457,6 +1552,17 @@ fn banner(build: &Build, ahead: Option<usize>) -> Markup {
 
 pub fn sidebar(ctx: &Context<'_>, data: &BuildData, selected: Option<i64>) -> Markup {
     let BuildData { repo, build, .. } = data;
+    let begin = build.started_at;
+    let end = build.finished_at.unwrap_or_else(|| kiln_github::unix_now() as i64);
+    let lane = |task: &Task| -> Option<(f64, f64)> {
+        let (begin, start) = (begin?, task.started_at?);
+        let span = (end - begin).max(1) as f64;
+        let stop = task.finished_at.unwrap_or(end);
+        Some((
+            ((start - begin) as f64 / span * 100.0).clamp(0.0, 100.0),
+            (((stop - start).max(0) as f64 / span) * 100.0).clamp(1.0, 100.0),
+        ))
+    };
     html! {
         @if !data.tasks.is_empty() || !data.images.is_empty() {
             section class="card tasks" aria-label="Tasks" {
@@ -1465,11 +1571,20 @@ pub fn sidebar(ctx: &Context<'_>, data: &BuildData, selected: Option<i64>) -> Ma
                     @if index == 0 || phase_group(data.tasks[index - 1].kind) != group {
                         div class="group-label" { (group) }
                     }
-                    a class={"task" @if Some(task.ordinal) == selected { " selected" }} href={"#task-" (task.ordinal)}
+                    a id={"t-" (task.ordinal)} class={"task" @if Some(task.ordinal) == selected { " selected" }} href={"#task-" (task.ordinal)}
                         data-task=(task.ordinal) data-attempt=(data.attempt) data-state=(task.state.as_str()) data-default[Some(task.ordinal) == selected] {
                         (task_status(task.state, "sm"))
                         span class="name" { (task_title(task)) }
+                        (delta(task.started_at.zip(task.finished_at).map(|(s, f)| f - s), data.usual.task(task)))
                         span class="time" { (elapsed(task.started_at, task.finished_at)) }
+                        @if let Some((left, width)) = lane(task) {
+                            span class="lane" aria-hidden="true" { i class=(task_kind(task.state).0) style={"left:" (format!("{left:.1}")) "%;width:" (format!("{width:.1}")) "%"} {} }
+                        }
+                        @if let (Some(cached), Some(total)) = (task.cached_steps, task.total_steps) {
+                            span class={"peak cache" @if cached == total { " all" }} title="BuildKit steps reused from the cache" {
+                                (cached) " of " (total) " steps cached"
+                            }
+                        }
                         @if let Some(peak) = task.peak_memory {
                             @let tight = task.memory_limit.is_some_and(|limit| peak * 100 >= limit * 85);
                             span class={"peak" @if tight { " tight" }} title="Peak use while running" {
@@ -1557,7 +1672,15 @@ pub fn images_card(images: &[ImageRecord]) -> Markup {
     }
 }
 
-pub fn log_view(build: &Build, attempt: i64, task: &Task, text: &str, bytes: usize, skipped: Option<usize>) -> Markup {
+pub fn log_view(
+    build: &Build,
+    attempt: i64,
+    task: &Task,
+    text: &str,
+    bytes: usize,
+    skipped: Option<usize>,
+    usual: &Usual,
+) -> Markup {
     let raw = format!("/builds/{}/logs/{attempt}/{}.txt", build.id, task.ordinal);
     html! {
         div class="log" {
@@ -1587,14 +1710,14 @@ pub fn log_view(build: &Build, attempt: i64, task: &Task, text: &str, bytes: usi
                 @if text.trim().is_empty() {
                     div class="log-empty" { @if task.state == TaskState::Pending { "Not started" } @else if task.state == TaskState::Skipped { "Skipped" } @else if task.state == TaskState::Running { "Waiting for output…" } @else { "No output" } }
                 } @else {
-                    (render_log(task, text, skipped.unwrap_or(0)))
+                    (render_log(task, text, skipped.unwrap_or(0), usual))
                 }
             }
         }
     }
 }
 
-fn render_log(task: &Task, text: &str, first: usize) -> Markup {
+fn render_log(task: &Task, text: &str, first: usize, usual: &Usual) -> Markup {
     let mut preamble = Vec::new();
     let mut sections: Vec<(usize, Vec<&str>)> = Vec::new();
     for line in text.lines() {
@@ -1625,6 +1748,9 @@ fn render_log(task: &Task, text: &str, first: usize) -> Markup {
                     (icon(Icon::Chevron))
                     span class={"dot " (task_kind(state).0)} {}
                     span class="name" { (step.map(|s| s.name.clone()).unwrap_or_else(|| format!("Step {}", index + 1))) }
+                    @if let Some(step) = step {
+                        (delta(step.started_at.zip(step.finished_at).map(|(s, f)| f - s), usual.step(task, &step.name)))
+                    }
                     span class="time" { @if let Some(step) = step { (elapsed(step.started_at, step.finished_at)) } }
                 }
                 (lines)

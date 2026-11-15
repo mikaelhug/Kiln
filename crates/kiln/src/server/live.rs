@@ -282,9 +282,14 @@ impl Platform for Live {
             .context("reading build pod metrics")?;
         let mut out = Vec::new();
         for pod in &list.items {
+            let at = pod.data["timestamp"]
+                .as_str()
+                .and_then(|t| t.parse::<kiln_runner::k8s_openapi::jiff::Timestamp>().ok())
+                .map_or_else(|| kiln_github::unix_now() as i64, |t| t.as_second());
             for container in pod.data["containers"].as_array().into_iter().flatten() {
                 let read = |key: &str| container["usage"][key].as_str().map(quantity_value).unwrap_or_default();
                 out.push(ContainerUsage {
+                    at,
                     pod: pod.name_any(),
                     container: container["name"].as_str().unwrap_or_default().to_owned(),
                     cpu: read("cpu"),

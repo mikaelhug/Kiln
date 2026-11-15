@@ -53,7 +53,7 @@ tempfile = "3.27.0"
 thiserror = "2.0.21"
 time = "0.3.55"
 tokio = { version = "1.54.1", features = ["sync", "time"] }
-tokio-stream = { version = "0.1.19", features = ["sync"] }
+tokio-stream = { version = "0.1.19", features = ["sync", "time"] }
 tokio-util = { version = "0.7.20", features = ["io"] }
 toml = { version = "1.2.1", features = ["preserve_order"] }
 tower-http = { version = "0.7.1", features = ["trace", "set-header", "limit"] }

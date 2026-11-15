@@ -1392,6 +1392,11 @@ impl<P: Platform> Engine<P> {
             }
             self.logs.replace(build.id, attempt, task.ordinal, &text)?
         };
+        if task.kind == TaskKind::Image
+            && let Some((cached, total)) = kiln_runner::cache_counts(&text)
+        {
+            self.store.set_task_cache(build.id, attempt, task.ordinal, cached as i64, total as i64)?;
+        }
         self.store.update_task(
             build.id,
             attempt,
@@ -1492,7 +1497,7 @@ impl<P: Platform> Engine<P> {
     }
 
     async fn usage_loop(self: Arc<Self>) {
-        let mut tick = tokio::time::interval(Duration::from_secs(10));
+        let mut tick = tokio::time::interval(Duration::from_secs(15));
         loop {
             tick.tick().await;
             if let Err(error) = self.sample_usage().await {
@@ -1515,8 +1520,17 @@ impl<P: Platform> Engine<P> {
             }
             let cpu: f64 = containers.iter().map(|c| c.cpu).sum();
             let memory: f64 = containers.iter().map(|c| c.memory).sum();
-            self.usage.record(build.id, Sample { at: now(), cpu, memory });
+            let at = containers.iter().map(|c| c.at).max().unwrap_or_else(now);
             let tasks = self.store.tasks(build.id, build.attempt)?;
+            let limit = tasks
+                .iter()
+                .filter(|t| t.state == TaskState::Running)
+                .filter_map(|t| t.memory_limit)
+                .max()
+                .map(|l| l as f64);
+            if !self.usage.record(build.id, Sample { at, cpu, memory, limit }) {
+                continue;
+            }
             for task in tasks.iter().filter(|t| t.state == TaskState::Running) {
                 let source = if task.kind == TaskKind::Image { "buildkitd" } else { task.container.as_str() };
                 if let Some(used) = containers.iter().find(|c| c.container == source) {
@@ -1529,7 +1543,7 @@ impl<P: Platform> Engine<P> {
                     )?;
                 }
             }
-            let _ = self.logs.events().send(Event::Usage { build: build.id, repo: build.repo_id, cpu, memory });
+            let _ = self.logs.events().send(Event::Usage { build: build.id, repo: build.repo_id, cpu, memory, limit });
         }
         Ok(())
     }

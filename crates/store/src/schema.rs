@@ -204,6 +204,10 @@ ALTER TABLE tasks ADD COLUMN peak_cpu_milli INTEGER;
 ALTER TABLE tasks ADD COLUMN peak_memory INTEGER;
 ALTER TABLE tasks ADD COLUMN memory_limit INTEGER;
 ",
+    r"
+ALTER TABLE tasks ADD COLUMN cached_steps INTEGER;
+ALTER TABLE tasks ADD COLUMN total_steps INTEGER;
+",
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

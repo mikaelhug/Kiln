@@ -2,6 +2,7 @@ mod ansi;
 pub mod connect;
 mod views;
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
@@ -318,15 +319,50 @@ struct DashboardQuery {
     before: Option<i64>,
 }
 
-fn live_info<P: Platform>(web: &Web<P>, build: &kiln_store::Build, history: &[kiln_store::Build]) -> views::Live {
+fn usual<P: Platform>(web: &Web<P>, build: &kiln_store::Build) -> views::Usual {
+    let store = &web.engine.store;
     let pull_request = build.trigger == Trigger::PullRequest;
-    let similar: Vec<kiln_store::Build> = history
-        .iter()
-        .filter(|b| b.repo_id == build.repo_id && (b.trigger == Trigger::PullRequest) == pull_request)
-        .take(20)
-        .cloned()
-        .collect();
-    views::Live { estimate: views::median(&similar), samples: web.engine.usage.history(build.id) }
+    let history = store
+        .builds(&BuildFilter {
+            repo: Some(build.repo_id),
+            states: vec![BuildState::Succeeded],
+            limit: 30,
+            ..Default::default()
+        })
+        .unwrap_or_default();
+    let mut tasks: HashMap<String, Vec<i64>> = HashMap::new();
+    let mut steps: HashMap<(String, String), Vec<i64>> = HashMap::new();
+    for past in
+        history.iter().filter(|b| b.id != build.id && (b.trigger == Trigger::PullRequest) == pull_request).take(10)
+    {
+        for task in store.tasks(past.id, past.attempt).unwrap_or_default() {
+            let key = views::task_key(&task);
+            if let (Some(start), Some(end)) = (task.started_at, task.finished_at) {
+                tasks.entry(key.clone()).or_default().push(end - start);
+            }
+            for step in &task.steps {
+                if let (Some(start), Some(end)) = (step.started_at, step.finished_at) {
+                    steps.entry((key.clone(), step.name.clone())).or_default().push(end - start);
+                }
+            }
+        }
+    }
+    fn median(mut values: Vec<i64>) -> i64 {
+        values.sort_unstable();
+        values[values.len() / 2]
+    }
+    views::Usual {
+        tasks: tasks.into_iter().map(|(k, v)| (k, median(v))).collect(),
+        steps: steps.into_iter().map(|(k, v)| (k, median(v))).collect(),
+    }
+}
+
+fn live_info<P: Platform>(web: &Web<P>, build: &kiln_store::Build, usual: &views::Usual) -> views::Live {
+    let tasks = web.engine.store.tasks(build.id, build.attempt).unwrap_or_default();
+    views::Live {
+        finish: views::finish_estimate(&tasks, usual, unix_now()),
+        samples: web.engine.usage.history(build.id),
+    }
 }
 
 fn dashboard_data<P: Platform>(web: &Web<P>, query: &DashboardQuery) -> WebResult<views::DashboardData> {
@@ -364,6 +400,15 @@ fn dashboard_data<P: Platform>(web: &Web<P>, query: &DashboardQuery) -> WebResul
         rate: (!judged.is_empty())
             .then(|| (judged.iter().filter(|b| b.state == BuildState::Succeeded).count(), judged.len())),
         median: views::median(&judged),
+        median_wait: {
+            let mut waits: Vec<i64> = finished
+                .iter()
+                .filter(|b| b.created_at >= day)
+                .filter_map(|b| Some(b.started_at? - b.created_at))
+                .collect();
+            waits.sort_unstable();
+            waits.get(waits.len() / 2).copied()
+        },
         hours: {
             let mut hours = vec![(0, 0); 24];
             for build in &finished {
@@ -382,7 +427,7 @@ fn dashboard_data<P: Platform>(web: &Web<P>, query: &DashboardQuery) -> WebResul
         },
         recent: judged.iter().take(30).rev().map(|b| b.state).collect(),
     };
-    let live = active.iter().map(|b| (b.id, live_info(web, b, &finished))).collect();
+    let live = active.iter().map(|b| (b.id, live_info(web, b, &usual(web, b)))).collect();
     Ok(views::DashboardData {
         live,
         repos,
@@ -525,18 +570,9 @@ fn build_data<P: Platform>(
             |b: &kiln_store::Build| (b.trigger == Trigger::PullRequest, b.trigger != Trigger::Tag, b.created_at, b.id);
         store.queued().map(|queued| queued.iter().filter(|other| rank(other) < rank(&build)).count()).unwrap_or(0)
     });
-    let live = build.state.is_active().then(|| {
-        let history = store
-            .builds(&BuildFilter {
-                repo: Some(build.repo_id),
-                states: vec![BuildState::Succeeded],
-                limit: 40,
-                ..Default::default()
-            })
-            .unwrap_or_default();
-        live_info(web, &build, &history)
-    });
-    Ok(views::BuildData { ahead, repo, build, attempt, tasks, images, rerun_of, live })
+    let usual = usual(web, &build);
+    let live = build.state.is_active().then(|| live_info(web, &build, &usual));
+    Ok(views::BuildData { ahead, repo, build, attempt, tasks, images, rerun_of, live, usual })
 }
 
 async fn build_page<P: Platform>(
@@ -608,7 +644,8 @@ async fn fragment_log<P: Platform>(
     } else {
         (None, text.as_str())
     };
-    Ok(render(views::log_view(&build, attempt, &task, shown, text.len(), skipped)))
+    let usual = usual(&web, &build);
+    Ok(render(views::log_view(&build, attempt, &task, shown, text.len(), skipped, &usual)))
 }
 
 async fn raw_log<P: Platform>(
@@ -962,6 +999,7 @@ async fn system<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebR
 async fn events<P: Platform>(
     State(web): State<Arc<Web<P>>>,
     user: User,
+    Query(scope): Query<crate::server::logs::Scope>,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
     let receiver = web.engine.logs.events().subscribe();
     let store = web.engine.store.clone();
@@ -976,12 +1014,21 @@ async fn events<P: Platform>(
             }
         }
     };
-    let stream = tokio_stream::wrappers::BroadcastStream::new(receiver)
-        .filter_map(|event| async move {
-            let event = event.unwrap_or(crate::server::logs::Event::Resync);
-            Some(Ok(SseEvent::default().data(serde_json::to_string(&event).ok()?)))
-        })
-        .take_until(Box::pin(revoked));
+    let stream = tokio_stream::StreamExt::chunks_timeout(
+        tokio_stream::wrappers::BroadcastStream::new(receiver)
+            .map(|event| event.unwrap_or(crate::server::logs::Event::Resync))
+            .filter(move |event| std::future::ready(scope.wants(event))),
+        256,
+        Duration::from_millis(150),
+    )
+    .flat_map(|batch| {
+        futures::stream::iter(
+            crate::server::logs::coalesce(batch)
+                .into_iter()
+                .filter_map(|event| Some(Ok(SseEvent::default().data(serde_json::to_string(&event).ok()?)))),
+        )
+    })
+    .take_until(Box::pin(revoked));
     Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(20)))
 }
 

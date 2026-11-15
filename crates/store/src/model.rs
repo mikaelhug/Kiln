@@ -263,6 +263,8 @@ pub struct Task {
     pub peak_cpu_milli: Option<i64>,
     pub peak_memory: Option<i64>,
     pub memory_limit: Option<i64>,
+    pub cached_steps: Option<i64>,
+    pub total_steps: Option<i64>,
     pub steps: Vec<Step>,
 }
 

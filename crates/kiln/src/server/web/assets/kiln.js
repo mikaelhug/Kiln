@@ -49,20 +49,33 @@ function tickTimes() {
 }
 
 function tickDurations() {
+  if (document.hidden) return;
   const now = Date.now() / 1000;
   for (const el of document.querySelectorAll("[data-started]")) {
-    el.textContent = duration(now - Number(el.dataset.started));
+    const text = duration(now - Number(el.dataset.started));
+    if (el.textContent !== text) el.textContent = text;
   }
-  for (const bar of document.querySelectorAll(".progress[data-since]")) {
-    const elapsed = now - Number(bar.dataset.since);
-    const estimate = Number(bar.dataset.estimate || 0);
-    const eta = bar.parentElement.querySelector("[data-eta]");
-    if (!estimate) continue;
-    const share = Math.min(elapsed / estimate, 0.97);
-    bar.firstElementChild.style.transform = `scaleX(${share.toFixed(4)})`;
-    bar.classList.toggle("over", elapsed > estimate);
-    if (eta) eta.textContent = elapsed < estimate ? `~${duration(estimate - elapsed)} left` : "Longer than usual";
+  for (const bar of document.querySelectorAll("[data-finish]")) {
+    const since = Number(bar.dataset.since);
+    const finish = Number(bar.dataset.finish);
+    const share = Math.min((now - since) / Math.max(finish - since, 1), 1);
+    const fill = bar.firstElementChild;
+    const scale = `scaleX(${share.toFixed(3)})`;
+    if (fill && fill.style.transform !== scale) fill.style.transform = scale;
+    const over = now > finish;
+    bar.classList.toggle("over", over);
+    const eta = bar.closest(".build-row")?.querySelector(".when .eta") || bar.parentElement.querySelector("[data-eta]");
+    if (eta) {
+      const text = over ? `+${roughly(now - finish)}` : `~${roughly(finish - now)} left`;
+      if (eta.textContent !== text) eta.textContent = text;
+      eta.classList.toggle("over", over);
+    }
   }
+}
+
+function roughly(seconds) {
+  if (seconds < 120) return duration(Math.max(10, Math.round(seconds / 10) * 10));
+  return duration(Math.round(seconds / 60) * 60);
 }
 
 function cpuText(cores) {
@@ -77,24 +90,29 @@ function memoryText(bytes) {
 function drawUsage(el) {
   let points = [];
   try { points = JSON.parse(el.dataset.points || "[]"); } catch (_) {}
-  const line = (index) => {
-    const values = points.map((p) => p[index]);
-    const top = Math.max(...values, 0) || 1;
-    const step = values.length > 1 ? 100 / (values.length - 1) : 0;
-    return values.map((v, i) => `${(i * step).toFixed(1)},${(22 - (v / top) * 20).toFixed(1)}`).join(" ");
-  };
-  el.querySelector("polyline.cpu")?.setAttribute("points", line(0));
-  el.querySelector("polyline.mem")?.setAttribute("points", line(1));
+  const trend = el.querySelector(".trend");
+  if (!trend) return;
+  trend.classList.toggle("hidden", points.length < 4);
+  if (points.length < 4) return;
+  const limit = Math.max(...points.map((p) => p[2] || 0));
+  const top = [Math.max(1, ...points.map((p) => p[0])), Math.max(limit, ...points.map((p) => p[1])) || 1];
+  const step = 100 / (points.length - 1);
+  const line = (index) => points.map((p, i) => `${(i * step).toFixed(1)},${(22 - (p[index] / top[index]) * 20).toFixed(1)}`).join(" ");
+  trend.querySelector("polyline.cpu").setAttribute("points", line(0));
+  trend.querySelector("polyline.mem").setAttribute("points", line(1));
+  trend.querySelector("line.limit").classList.toggle("hidden", !limit);
 }
 
 function onUsage(event) {
   for (const el of document.querySelectorAll(`[data-usage="${event.build}"]`)) {
     let points = [];
     try { points = JSON.parse(el.dataset.points || "[]"); } catch (_) {}
-    points.push([event.cpu, event.memory]);
+    points.push([event.cpu, event.memory, event.limit || 0]);
     el.dataset.points = JSON.stringify(points.slice(-60));
     el.querySelector(".cpu .v").textContent = cpuText(event.cpu);
     el.querySelector(".mem .v").textContent = memoryText(event.memory);
+    const of = el.querySelector(".mem .of");
+    if (of) of.textContent = event.limit ? ` of ${memoryText(event.limit)}` : "";
     drawUsage(el);
   }
 }
@@ -163,14 +181,33 @@ function syncAttributes(el, next) {
     el.removeAttribute(name);
   }
   for (const { name, value } of [...next.attributes]) {
-    if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+    if (el.getAttribute(name) === value) continue;
+    if ((name === "data-state" || name === "data-value") && el.hasAttribute(name)) markChanged(el);
+    el.setAttribute(name, value);
   }
+}
+
+function markChanged(el) {
+  el.classList.remove("changed");
+  void el.offsetWidth;
+  el.classList.add("changed");
+  el.addEventListener("animationend", () => el.classList.remove("changed"), { once: true });
 }
 
 function morph(from, to) {
   const incoming = [...to.childNodes];
   incoming.forEach((next, index) => {
-    const current = from.childNodes[index];
+    let current = from.childNodes[index];
+    if (next.nodeType === 1 && next.id && (!current || current.id !== next.id)) {
+      const keyed = [...from.children].find((child) => child.id === next.id);
+      if (keyed) {
+        from.insertBefore(keyed, current || null);
+        current = keyed;
+      } else {
+        from.insertBefore(next, current || null);
+        return;
+      }
+    }
     if (!current) {
       from.append(next);
       return;
@@ -663,7 +700,10 @@ function connect() {
   let source;
   let wasOpen = false;
   const open = () => {
-    source = new EventSource("/events");
+    const scope = new URLSearchParams({ page: page || "" });
+    if (buildId) scope.set("build", buildId);
+    if (repoId) scope.set("repo", repoId);
+    source = new EventSource(`/events?${scope}`);
     source.onopen = () => {
       live?.classList.add("on");
       live?.classList.remove("off");

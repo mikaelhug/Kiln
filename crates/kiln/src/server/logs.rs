@@ -17,7 +17,75 @@ pub enum Event {
     LogReset { build: i64, attempt: i64, task: i64 },
     Activity,
     Resync,
-    Usage { build: i64, repo: i64, cpu: f64, memory: f64 },
+    Usage { build: i64, repo: i64, cpu: f64, memory: f64, limit: Option<f64> },
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct Scope {
+    pub page: Option<String>,
+    pub build: Option<i64>,
+    pub repo: Option<i64>,
+}
+
+impl Scope {
+    pub fn wants(&self, event: &Event) -> bool {
+        let page = self.page.as_deref().unwrap_or_default();
+        let this_build = |id: i64| self.build == Some(id);
+        let this_repo = |id: i64| self.repo == Some(id);
+        match (page, event) {
+            (_, Event::Resync) => true,
+            ("build", Event::Build { build, .. })
+            | ("build", Event::Log { build, .. })
+            | ("build", Event::LogReset { build, .. })
+            | ("build", Event::Usage { build, .. }) => this_build(*build),
+            ("build", _) => false,
+            ("dashboard", Event::Build { .. } | Event::Repo { .. } | Event::Usage { .. }) => true,
+            ("repos", Event::Build { .. } | Event::Repo { .. }) => true,
+            ("repo", Event::Build { repo, .. } | Event::Repo { repo } | Event::Usage { repo, .. }) => this_repo(*repo),
+            ("system", Event::Build { .. } | Event::Repo { .. } | Event::Activity) => true,
+            ("settings", Event::Activity) => true,
+            ("dashboard" | "repos" | "repo" | "system" | "settings", _) => false,
+            _ => true,
+        }
+    }
+}
+
+pub fn coalesce(events: Vec<Event>) -> Vec<Event> {
+    let mut out: Vec<Event> = Vec::new();
+    for event in events {
+        match &event {
+            Event::Build { build, .. } | Event::Usage { build, .. } => {
+                let same = |e: &Event| match (e, &event) {
+                    (Event::Build { build: a, .. }, Event::Build { .. }) => a == build,
+                    (Event::Usage { build: a, .. }, Event::Usage { .. }) => a == build,
+                    _ => false,
+                };
+                out.retain(|e| !same(e));
+                out.push(event);
+            }
+            Event::Repo { repo } => {
+                let repo = *repo;
+                out.retain(|e| !matches!(e, Event::Repo { repo: r } if *r == repo));
+                out.push(event);
+            }
+            Event::Activity => {
+                out.retain(|e| !matches!(e, Event::Activity));
+                out.push(event);
+            }
+            Event::Log { build, attempt, task, offset, text } => {
+                if let Some(Event::Log { build: b, attempt: a, task: t, offset: o, text: previous }) = out.last_mut()
+                    && (*b, *a, *t) == (*build, *attempt, *task)
+                    && *o + previous.len() as u64 == *offset
+                {
+                    previous.push_str(text);
+                    continue;
+                }
+                out.push(event);
+            }
+            _ => out.push(event),
+        }
+    }
+    out
 }
 
 pub struct Logs {
@@ -116,3 +184,30 @@ impl Logs {
         let _ = std::fs::remove_dir_all(self.dir.join("logs").join(build.to_string()));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grouping_keeps_the_last_build_event_and_joins_only_contiguous_log_text() {
+        let log = |offset, text: &str| Event::Log { build: 1, attempt: 1, task: 2, offset, text: text.into() };
+        let grouped = coalesce(vec![
+            Event::Build { build: 1, repo: 9 },
+            log(0, "ab\n"),
+            log(3, "cd\n"),
+            Event::Build { build: 1, repo: 9 },
+            log(10, "gap\n"),
+        ]);
+        let shape: Vec<String> = grouped
+            .iter()
+            .map(|e| match e {
+                Event::Log { offset, text, .. } => format!("log {offset} {text:?}"),
+                Event::Build { build, .. } => format!("build {build}"),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(shape, ["log 0 \"ab\\ncd\\n\"", "build 1", "log 10 \"gap\\n\""]);
+    }
+}
+

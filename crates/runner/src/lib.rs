@@ -3,7 +3,7 @@ mod observe;
 mod pod;
 
 pub use k8s_openapi;
-pub use markers::{Marker, parse_marker, render_marker};
+pub use markers::{Marker, cache_counts, parse_marker, render_marker};
 pub use observe::{Observation, Outcome, observe};
 pub use pod::{Plan, Rendered, Scope, Settings, StepSpec, cache_claim_name, candidate_ref, quantity_value, render};
 

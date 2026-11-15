@@ -419,6 +419,14 @@ impl Store {
         Ok(())
     }
 
+    pub fn set_task_cache(&self, build: i64, attempt: i64, ordinal: i64, cached: i64, total: i64) -> Result<()> {
+        self.conn().execute(
+            "UPDATE tasks SET cached_steps = ?4, total_steps = ?5 WHERE build_id = ?1 AND attempt = ?2 AND ordinal = ?3",
+            params![build, attempt, ordinal, cached, total],
+        )?;
+        Ok(())
+    }
+
     pub fn set_task_memory_limit(&self, build: i64, attempt: i64, container: &str, bytes: i64) -> Result<()> {
         self.conn().execute(
             "UPDATE tasks SET memory_limit = ?4 WHERE build_id = ?1 AND attempt = ?2 AND container = ?3",
@@ -431,7 +439,7 @@ impl Store {
         let conn = self.conn();
         let mut statement = conn.prepare(
             "SELECT ordinal, kind, name, container, state, exit_code, reason, started_at, finished_at, log_final, log_bytes,
-                    peak_cpu_milli, peak_memory, memory_limit
+                    peak_cpu_milli, peak_memory, memory_limit, cached_steps, total_steps
              FROM tasks WHERE build_id = ?1 AND attempt = ?2 ORDER BY ordinal",
         )?;
         let mut tasks: Vec<Task> = statement
@@ -451,6 +459,8 @@ impl Store {
                     peak_cpu_milli: row.get(11)?,
                     peak_memory: row.get(12)?,
                     memory_limit: row.get(13)?,
+                    cached_steps: row.get(14)?,
+                    total_steps: row.get(15)?,
                     steps: Vec::new(),
                 })
             })?

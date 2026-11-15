@@ -544,6 +544,7 @@ impl Platform for Arc<Fake> {
                 let wave = ((now / 7.0 + seed).sin() + 1.0) / 2.0;
                 let heavy = status.name == "buildkitd" || status.name.starts_with("test-");
                 out.push(ContainerUsage {
+                    at: (unix_now() as i64 / 15) * 15,
                     pod: pod.clone(),
                     container: status.name.clone(),
                     cpu: if heavy { 0.6 + 2.4 * wave } else { 0.02 + 0.05 * wave },
