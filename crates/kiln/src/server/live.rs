@@ -6,20 +6,29 @@ use futures::{AsyncReadExt, StreamExt};
 use kiln_github::{CheckRun, Client, Compare, Conditional, Head, PullRequest, TagRef, Token};
 use kiln_registry::{Promotion, Registry};
 use kiln_runner::k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod, Secret};
-use kiln_runner::{BUILD_LABEL, MANAGED_BY, quantity_value};
+use kiln_runner::{BUILD_LABEL, MANAGED_BY};
 use kiln_store::Repo;
-use kube::api::{ApiResource, DeleteParams, DynamicObject, GroupVersionKind, ListParams, LogParams, PostParams};
+use kube::api::{DeleteParams, ListParams, LogParams, PostParams};
 use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Api, ResourceExt};
 
 use super::platform::{ContainerUsage, Platform, PodEvent, PodRejected, RepoInfo};
 use super::settings::{PULL_SECRET, PUSH_SECRET, Settings};
 
+const SERVICE_ACCOUNT: &str = "/var/run/secrets/kubernetes.io/serviceaccount";
+
+fn kubelet_client() -> Result<reqwest::Client> {
+    let ca = std::fs::read(format!("{SERVICE_ACCOUNT}/ca.crt")).context("reading the cluster CA")?;
+    let certificates = reqwest::Certificate::from_pem_bundle(&ca).context("parsing the cluster CA")?;
+    Ok(reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).tls_certs_only(certificates).build()?)
+}
+
 pub struct Live {
     github: Client,
     registry: Registry,
     pods: Api<Pod>,
-    pod_metrics: Api<DynamicObject>,
+    kubelet: reqwest::Client,
+    namespace: String,
     secrets: Api<Secret>,
     claims: Api<PersistentVolumeClaim>,
     cache_class: Option<String>,
@@ -76,14 +85,8 @@ impl Live {
             github,
             registry,
             pods: Api::namespaced(kube.clone(), namespace),
-            pod_metrics: Api::namespaced_with(
-                kube.clone(),
-                namespace,
-                &ApiResource::from_gvk_with_plural(
-                    &GroupVersionKind::gvk("metrics.k8s.io", "v1beta1", "PodMetrics"),
-                    "pods",
-                ),
-            ),
+            kubelet: kubelet_client()?,
+            namespace: namespace.clone(),
             secrets: Api::namespaced(kube.clone(), namespace),
             claims: Api::namespaced(kube, namespace),
             cache_class: settings.cache_class.clone(),
@@ -275,22 +278,41 @@ impl Platform for Live {
     }
 
     async fn pod_usage(&self) -> Result<Vec<ContainerUsage>> {
-        let list = self.pod_metrics.list(&ListParams::default()).await.context("reading build pod metrics")?;
+        let pods = self.pods.list(&ListParams::default().labels(&format!("{MANAGED_BY}=kiln"))).await?;
+        let nodes: std::collections::BTreeSet<String> =
+            pods.items.iter().filter_map(|p| p.status.as_ref()?.host_ip.clone()).collect();
+        let token =
+            std::fs::read_to_string(format!("{SERVICE_ACCOUNT}/token")).context("reading the service account token")?;
         let mut out = Vec::new();
-        for pod in &list.items {
-            let at = pod.data["timestamp"]
-                .as_str()
-                .and_then(|t| t.parse::<kiln_runner::k8s_openapi::jiff::Timestamp>().ok())
-                .map_or_else(|| kiln_github::unix_now() as i64, |t| t.as_second());
-            for container in pod.data["containers"].as_array().into_iter().flatten() {
-                let read = |key: &str| container["usage"][key].as_str().map(quantity_value).unwrap_or_default();
-                out.push(ContainerUsage {
-                    at,
-                    pod: pod.name_any(),
-                    container: container["name"].as_str().unwrap_or_default().to_owned(),
-                    cpu: read("cpu"),
-                    memory: read("memory"),
-                });
+        for node in nodes {
+            let summary: serde_json::Value = self
+                .kubelet
+                .get(format!("https://{node}:10250/stats/summary"))
+                .bearer_auth(token.trim())
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status)
+                .with_context(|| format!("reading usage from the kubelet on {node}"))?
+                .json()
+                .await?;
+            for pod in summary["pods"].as_array().into_iter().flatten() {
+                if pod["podRef"]["namespace"].as_str() != Some(self.namespace.as_str()) {
+                    continue;
+                }
+                let name = pod["podRef"]["name"].as_str().unwrap_or_default();
+                for container in pod["containers"].as_array().into_iter().flatten() {
+                    let at = container["cpu"]["time"]
+                        .as_str()
+                        .and_then(|t| t.parse::<kiln_runner::k8s_openapi::jiff::Timestamp>().ok())
+                        .map_or_else(|| kiln_github::unix_now() as i64, |t| t.as_second());
+                    out.push(ContainerUsage {
+                        at,
+                        pod: name.to_owned(),
+                        container: container["name"].as_str().unwrap_or_default().to_owned(),
+                        cpu: container["cpu"]["usageNanoCores"].as_f64().unwrap_or_default() / 1e9,
+                        memory: container["memory"]["workingSetBytes"].as_f64().unwrap_or_default(),
+                    });
+                }
             }
         }
         Ok(out)

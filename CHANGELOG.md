@@ -4,6 +4,7 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+- Build CPU and memory come from each node's kubelet, verified against the cluster CA. metrics-server does not report pods whose work runs in init containers, so the Resources card and task peaks stayed empty. Kiln needs read access to node stats and network access to the kubelet port; the deploy kit grants both.
 - A running build's page has a Resources panel: CPU and memory as current value, peak, a meter against the request or limit and a 15-minute area chart, naming the task being measured. Memory turns amber at 75% and red at 90% of the limit.
 - Each page receives only the events it shows, and bursts are grouped, so pages stay quiet and log lines arrive in batches.
 - The live meter uses metrics-server's own sample times, scales memory against the limit and shows a trend once there are enough samples. On the dashboard a running build has a thin progress line and the time left instead of a growing row; numbers and trend are on the build page. Nothing animates while idle.

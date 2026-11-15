@@ -22,9 +22,6 @@ rules:
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [create, get, delete]
-  - apiGroups: [metrics.k8s.io]
-    resources: [pods]
-    verbs: [list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -35,6 +32,28 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: kiln
+subjects:
+  - kind: ServiceAccount
+    name: kiln
+    namespace: kiln
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kiln-node-stats
+rules:
+  - apiGroups: [""]
+    resources: [nodes/stats]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kiln-node-stats
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kiln-node-stats
 subjects:
   - kind: ServiceAccount
     name: kiln

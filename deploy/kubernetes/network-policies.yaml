@@ -57,6 +57,12 @@ spec:
       ports:
         - port: 6443
           protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 192.0.2.0/24
+      ports:
+        - port: 10250
+          protocol: TCP
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

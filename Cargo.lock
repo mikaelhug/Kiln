@@ -1603,6 +1603,7 @@ dependencies = [
  "kube",
  "maud",
  "nix",
+ "reqwest",
  "semver",
  "serde",
  "serde_json",

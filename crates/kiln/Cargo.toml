@@ -27,6 +27,7 @@ kiln-registry.workspace = true
 kiln-runner.workspace = true
 kiln-store.workspace = true
 kube.workspace = true
+reqwest.workspace = true
 maud.workspace = true
 nix.workspace = true
 semver.workspace = true

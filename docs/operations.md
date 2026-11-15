@@ -10,14 +10,14 @@ This guide takes you from nothing to a first build. Kiln ships as one image, `gh
 - **A CSI storage class with `ReadWriteOncePod`** for Kiln's database, and one with `ReadWriteOnce` for build caches.
 - **A way in from the internet:** the Gateway API with a Gateway that accepts routes from the `kiln` namespace, or an Ingress controller. GitHub must reach `/hooks/github`, and your browser the UI.
 - **An OCI registry**, such as GitHub Container Registry.
-- **Optional: metrics-server**, for live CPU and memory of running builds and each task's peak use.
+- **Optional: kubelet serving certificates signed by the cluster CA**, for live CPU and memory of running builds and each task's peak use. Kiln reads them from each node's kubelet. On Talos, set the kubelet's `rotate-server-certificates: "true"` and run kubelet-serving-cert-approver.
 - **Optional: gVisor** (a `gvisor` RuntimeClass) to sandbox pull request builds.
 
 ## 1. Deploy
 
 `deploy/kubernetes` is a kustomization with everything Kiln needs:
 - the namespaces and their Pod Security levels;
-- RBAC that lets Kiln manage pods, pod logs, secrets and cache claims in `kiln-builds`, and read the build pods' CPU and memory use. Kiln can create and delete secrets there but never read them;
+- RBAC that lets Kiln manage pods, pod logs, secrets and cache claims in `kiln-builds`, and read node stats for the build pods' CPU and memory use. Kiln can create and delete secrets there but never read them;
 - a ValidatingAdmissionPolicy that refuses build pods with a service account token, host namespaces, host paths, privileged containers or added capabilities;
 - a PriorityClass and a ResourceQuota for builds;
 - the network policies, the server, its storage and its route;
@@ -29,7 +29,7 @@ There are no secrets to prepare: Kiln creates its GitHub App and keeps its crede
 |---|---|
 | `config.yaml` | `KILN_PUBLIC_URL` |
 | `server.yaml` | the image, the `HTTPRoute` parent (`traefik/public`) and hostname; use an `Ingress` instead if you have no Gateway API |
-| `network-policies.yaml` | the namespace of your ingress controller (`traefik`) that may reach the server, and the API server addresses |
+| `network-policies.yaml` | the namespace of your ingress controller (`traefik`) that may reach the server, the API server addresses, and your nodes' addresses for the kubelet port |
 | `build-policy.yaml` | the ResourceQuota: at least `KILN_SLOTS` times the requests of your largest build |
 
 **The image.** Pin the server image in `server.yaml` to a release by its digest from the release notes, for example `ghcr.io/mikaelhug/kiln:0.2.1@sha256:…`. Build pods run the same image for Kiln's helper, so the server and helper always match. Every push to Kiln's `main` also publishes `X.Y.(Z+1)-rc.N`, which image automation with a policy such as `>=0.0.0-0` can follow.
