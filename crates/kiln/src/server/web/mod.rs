@@ -52,6 +52,8 @@ fn content_policy(github_web: &str) -> HeaderValue {
     HeaderValue::from_str(&policy).unwrap_or_else(|_| HeaderValue::from_static("default-src 'self'"))
 }
 
+type UsualEntry = (Option<i64>, Arc<views::Usual>);
+
 pub struct Web<P: Platform> {
     pub engine: Arc<Engine<P>>,
     pub oauth: Option<OAuthApp>,
@@ -59,6 +61,7 @@ pub struct Web<P: Platform> {
     pub claim_code: Option<String>,
     pub claims: std::sync::Mutex<std::collections::HashMap<String, (kiln_github::GitHubUser, i64)>>,
     pub deliveries: std::sync::Mutex<std::collections::VecDeque<String>>,
+    pub usual: std::sync::Mutex<HashMap<(i64, bool), UsualEntry>>,
 }
 
 pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
@@ -319,7 +322,7 @@ struct DashboardQuery {
     before: Option<i64>,
 }
 
-fn usual<P: Platform>(web: &Web<P>, build: &kiln_store::Build) -> views::Usual {
+fn usual<P: Platform>(web: &Web<P>, build: &kiln_store::Build) -> Arc<views::Usual> {
     let store = &web.engine.store;
     let pull_request = build.trigger == Trigger::PullRequest;
     let history = store
@@ -330,6 +333,13 @@ fn usual<P: Platform>(web: &Web<P>, build: &kiln_store::Build) -> views::Usual {
             ..Default::default()
         })
         .unwrap_or_default();
+    let key = (build.repo_id, pull_request);
+    let newest = history.first().map(|b| b.id);
+    if let Some((seen, cached)) = web.usual.lock().expect("usual cache").get(&key)
+        && *seen == newest
+    {
+        return cached.clone();
+    }
     let mut tasks: HashMap<String, Vec<i64>> = HashMap::new();
     let mut steps: HashMap<(String, String), Vec<i64>> = HashMap::new();
     for past in
@@ -351,16 +361,22 @@ fn usual<P: Platform>(web: &Web<P>, build: &kiln_store::Build) -> views::Usual {
         values.sort_unstable();
         values[values.len() / 2]
     }
-    views::Usual {
+    let computed = Arc::new(views::Usual {
         tasks: tasks.into_iter().map(|(k, v)| (k, median(v))).collect(),
         steps: steps.into_iter().map(|(k, v)| (k, median(v))).collect(),
-    }
+    });
+    web.usual.lock().expect("usual cache").insert(key, (newest, computed.clone()));
+    computed
 }
 
-fn live_info<P: Platform>(web: &Web<P>, build: &kiln_store::Build, usual: &views::Usual) -> views::Live {
-    let tasks = web.engine.store.tasks(build.id, build.attempt).unwrap_or_default();
+fn live_info<P: Platform>(
+    web: &Web<P>,
+    build: &kiln_store::Build,
+    usual: &views::Usual,
+    tasks: &[kiln_store::Task],
+) -> views::Live {
     views::Live {
-        finish: views::finish_estimate(&tasks, usual, unix_now()),
+        finish: views::finish_estimate(tasks, usual, unix_now()),
         samples: web.engine.usage.history(build.id),
     }
 }
@@ -427,7 +443,13 @@ fn dashboard_data<P: Platform>(web: &Web<P>, query: &DashboardQuery) -> WebResul
         },
         recent: judged.iter().take(30).rev().map(|b| b.state).collect(),
     };
-    let live = active.iter().map(|b| (b.id, live_info(web, b, &usual(web, b)))).collect();
+    let live = active
+        .iter()
+        .map(|b| {
+            let tasks = store.tasks(b.id, b.attempt).unwrap_or_default();
+            (b.id, live_info(web, b, &usual(web, b), &tasks))
+        })
+        .collect();
     Ok(views::DashboardData {
         live,
         repos,
@@ -571,7 +593,11 @@ fn build_data<P: Platform>(
         store.queued().map(|queued| queued.iter().filter(|other| rank(other) < rank(&build)).count()).unwrap_or(0)
     });
     let usual = usual(web, &build);
-    let live = build.state.is_active().then(|| live_info(web, &build, &usual));
+    let live = build.state.is_active().then(|| {
+        let current = if attempt == build.attempt { tasks.clone() } else { store.tasks(build.id, build.attempt)? };
+        Ok::<_, WebError>(live_info(web, &build, &usual, &current))
+    });
+    let live = live.transpose()?;
     Ok(views::BuildData { ahead, repo, build, attempt, tasks, images, rerun_of, live, usual })
 }
 

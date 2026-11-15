@@ -1519,15 +1519,23 @@ impl<P: Platform> Engine<P> {
                 continue;
             }
             let cpu: f64 = containers.iter().map(|c| c.cpu).sum();
-            let memory: f64 = containers.iter().map(|c| c.memory).sum();
             let at = containers.iter().map(|c| c.at).max().unwrap_or_else(now);
             let tasks = self.store.tasks(build.id, build.attempt)?;
-            let limit = tasks
-                .iter()
-                .filter(|t| t.state == TaskState::Running)
-                .filter_map(|t| t.memory_limit)
-                .max()
-                .map(|l| l as f64);
+            let mut watched: Vec<(&str, f64, i64)> = Vec::new();
+            for task in tasks.iter().filter(|t| t.state == TaskState::Running) {
+                let source = if task.kind == TaskKind::Image { "buildkitd" } else { task.container.as_str() };
+                if let (Some(used), Some(limit)) =
+                    (containers.iter().find(|c| c.container == source), task.memory_limit)
+                    && !watched.iter().any(|(name, ..)| *name == source)
+                {
+                    watched.push((source, used.memory, limit));
+                }
+            }
+            let (memory, limit) = if watched.is_empty() {
+                (containers.iter().map(|c| c.memory).sum(), None)
+            } else {
+                (watched.iter().map(|w| w.1).sum(), Some(watched.iter().map(|w| w.2 as f64).sum()))
+            };
             if !self.usage.record(build.id, Sample { at, cpu, memory, limit }) {
                 continue;
             }

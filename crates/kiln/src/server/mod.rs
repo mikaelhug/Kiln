@@ -100,6 +100,7 @@ async fn run<P: Platform>(
         claim_code,
         claims: Default::default(),
         deliveries: Default::default(),
+        usual: Default::default(),
     }))
     .layer(tower_http::trace::TraceLayer::new_for_http());
     let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listening on {listen}"))?;

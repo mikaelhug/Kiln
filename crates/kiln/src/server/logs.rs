@@ -39,9 +39,9 @@ impl Scope {
             | ("build", Event::LogReset { build, .. })
             | ("build", Event::Usage { build, .. }) => this_build(*build),
             ("build", _) => false,
-            ("dashboard", Event::Build { .. } | Event::Repo { .. } | Event::Usage { .. }) => true,
+            ("dashboard", Event::Build { .. } | Event::Repo { .. }) => true,
             ("repos", Event::Build { .. } | Event::Repo { .. }) => true,
-            ("repo", Event::Build { repo, .. } | Event::Repo { repo } | Event::Usage { repo, .. }) => this_repo(*repo),
+            ("repo", Event::Build { repo, .. } | Event::Repo { repo }) => this_repo(*repo),
             ("system", Event::Build { .. } | Event::Repo { .. } | Event::Activity) => true,
             ("settings", Event::Activity) => true,
             ("dashboard" | "repos" | "repo" | "system" | "settings", _) => false,

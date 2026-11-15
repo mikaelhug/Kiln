@@ -241,6 +241,7 @@ pub fn trigger_pill(build: &Build) -> Markup {
 pub fn failure_streak(builds: &[Build]) -> Option<(i64, usize)> {
     let streak: Vec<&Build> = builds
         .iter()
+        .rev()
         .filter(|b| b.trigger != Trigger::PullRequest && b.state.is_finished())
         .filter(|b| !matches!(b.state, BuildState::Cancelled | BuildState::Superseded | BuildState::Skipped))
         .take_while(|b| matches!(b.state, BuildState::Failed | BuildState::Errored))
@@ -256,10 +257,12 @@ fn streak_pill(builds: &[Build]) -> Markup {
     }
 }
 
-fn retry_pill(build: &Build) -> Markup {
+fn retry_pill(build: &Build, original: Option<&Build>) -> Markup {
+    let flaky = build.state == BuildState::Succeeded
+        && original.is_some_and(|o| o.sha == build.sha && matches!(o.state, BuildState::Failed | BuildState::Errored));
     html! {
-        @if build.state == BuildState::Succeeded && (build.attempt > 1 || build.rerun_of.is_some()) {
-            span class="pill warn" title="Passed after a retry; may be flaky" { (icon(Icon::Rerun)) "Retry" }
+        @if flaky {
+            span class="pill warn" title="Failed, then passed on a rerun of the same commit" { (icon(Icon::Rerun)) "Flaky" }
         }
     }
 }
@@ -317,6 +320,9 @@ impl Usual {
 }
 
 pub fn finish_estimate(tasks: &[Task], usual: &Usual, now: i64) -> Option<i64> {
+    if tasks.is_empty() {
+        return None;
+    }
     let mut left = 0;
     for task in tasks {
         match task.state {
@@ -417,7 +423,7 @@ pub fn build_row_live(build: &Build, repo: Option<&Repo>, show_repo: bool, meter
                 }
             }
             div class="ref" { (trigger_pill(build)) span class="sha" { (build.short_sha()) } }
-            div class="version" { (retry_pill(build)) (version_pill(build)) }
+            div class="version" { (version_pill(build)) }
             div class="when" {
                 span class="duration" { (elapsed(build.started_at, build.finished_at)) }
                 @if build.state.is_active() && meter.and_then(|m| m.finish).is_some() { span class="eta" data-eta {} } @else { (time(build.created_at)) }
@@ -1280,7 +1286,7 @@ fn triggers(on: &config::Triggers) -> String {
 }
 
 pub struct BuildData {
-    pub usual: Usual,
+    pub usual: std::sync::Arc<Usual>,
     pub live: Option<Live>,
     pub ahead: Option<usize>,
     pub repo: Repo,
@@ -1375,7 +1381,7 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                             a href=(trigger_url(ctx, repo, build)) target="_blank" rel="noopener" { (trigger_pill(build)) }
                             a class="mono" href=(commit_url) target="_blank" rel="noopener" title="Open the commit on GitHub" { (icon(Icon::Commit)) (build.short_sha()) }
                             (version_pill(build))
-                            (retry_pill(build))
+                            (retry_pill(build, data.rerun_of.as_ref()))
                             @if let Some(actor) = &build.actor { span { (icon(Icon::User)) (actor) } }
                             span { (icon(Icon::Clock)) (time(build.created_at)) }
                             @if build.started_at.is_some() { span { (icon(Icon::Timer)) (elapsed(build.started_at, build.finished_at)) } }
