@@ -4,6 +4,7 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+- Builds prefer the node with the most free CPU and memory right now, read from metrics-server. The deploy kit grants Kiln read access to nodes and their metrics.
 - Build pods start: the image keeps its binary at `/usr/local/bin/kiln`, so the helper's `/kiln/bin` mount no longer collides with it.
 - A container that cannot start shows the runtime's reason instead of "exited with code 128", and its duration no longer counts from 1970.
 - Live updates cover every page: steps update as they start and finish, releases show each image as it is published, System and Settings follow changes, and a browser that misses events catches up instead of going stale.

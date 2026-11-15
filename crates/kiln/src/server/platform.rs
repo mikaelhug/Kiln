@@ -66,6 +66,9 @@ pub trait Platform: Send + Sync + 'static {
     fn create_secret(&self, name: &str, build: i64, key: &str, value: &str) -> impl Future<Output = Result<()>> + Send;
     fn delete_secret(&self, name: &str) -> impl Future<Output = Result<()>> + Send;
     fn create_pod(&self, pod: &Pod) -> impl Future<Output = Result<()>> + Send;
+    fn quiet_nodes(&self) -> impl Future<Output = Result<Vec<String>>> + Send {
+        async { Ok(Vec::new()) }
+    }
     fn delete_pod(&self, name: &str) -> impl Future<Output = Result<()>> + Send;
     fn pods(&self) -> impl Future<Output = Result<Vec<Pod>>> + Send;
     fn watch(&self) -> BoxStream<'static, PodEvent>;

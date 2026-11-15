@@ -10,13 +10,14 @@ This guide takes you from nothing to a first build. Kiln ships as one image, `gh
 - **A CSI storage class with `ReadWriteOncePod`** for Kiln's database, and one with `ReadWriteOnce` for build caches.
 - **A way in from the internet:** the Gateway API with a Gateway that accepts routes from the `kiln` namespace, or an Ingress controller. GitHub must reach `/hooks/github`, and your browser the UI.
 - **An OCI registry**, such as GitHub Container Registry.
+- **Optional: metrics-server**, so Kiln places each build on the node with the most free CPU and memory right now.
 - **Optional: gVisor** (a `gvisor` RuntimeClass) to sandbox pull request builds.
 
 ## 1. Deploy
 
 `deploy/kubernetes` is a kustomization with everything Kiln needs:
 - the namespaces and their Pod Security levels;
-- RBAC that lets Kiln manage pods, pod logs, secrets and cache claims in `kiln-builds`. Kiln can create and delete secrets there but never read them;
+- RBAC that lets Kiln manage pods, pod logs, secrets and cache claims in `kiln-builds`, and list nodes and their metrics to place builds. Kiln can create and delete secrets there but never read them;
 - a ValidatingAdmissionPolicy that refuses build pods with a service account token, host namespaces, host paths, privileged containers or added capabilities;
 - a PriorityClass and a ResourceQuota for builds;
 - the network policies, the server, its storage and its route;
@@ -88,6 +89,8 @@ Every build is one pod in `kiln-builds`. Image builds use a rootless BuildKit si
 With `KILN_SANDBOX_RUNTIME_CLASS=gvisor`, pull request builds, which run only tests and never BuildKit, run entirely under gVisor.
 
 Build pods may reach DNS and the internet on ports 80 and 443, and nothing else, which blocks the LAN, the cluster network and the Kubernetes API. The server may reach public HTTPS addresses only; a registry on a private address or another port needs its own egress rule.
+
+**Placement and resources.** Kiln asks metrics-server how busy each node is when a build starts and prefers the one with the most headroom in CPU or memory; the scheduler still only uses nodes where the build's requests fit. Builds have no CPU limit, so a build uses every idle core on its node, and its CPU request only needs to cover what it must have under contention. Memory is the limit that stops a build: set `resources.memory` near the build's real peak, and the limit is that times `KILN_MEMORY_LIMIT_FACTOR`. An image's `resources` apply to BuildKit, where its `RUN` steps run.
 
 Each repository gets a `ReadWriteOnce` cache claim, created on demand. A build only mounts its own repository's cache, and pull requests use a separate directory in it, so they cannot poison the default branch's cache.
 
