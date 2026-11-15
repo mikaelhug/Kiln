@@ -4,6 +4,15 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+## 0.2.1
+
+- Live updates stop within seconds for someone who is removed or signed out.
+- **Settings › GitHub › Disconnect** recovers from a deleted or revoked GitHub App without losing people or history.
+- Settings and System show when Kiln could not create the registry secrets for build pods.
+- Adding a person says when GitHub did not answer instead of claiming the user does not exist.
+- `[[images]].resources` gives BuildKit more CPU and memory for heavy builds.
+- `services[].port` makes a job wait until its service, such as Postgres, accepts connections.
+
 ## 0.2.0
 
 - Connect GitHub from the browser: a fresh Kiln asks for the setup code from its log, creates its GitHub App through the manifest flow and keeps the credentials itself. The `kiln setup` command and the GitHub and registry environment variables are gone.

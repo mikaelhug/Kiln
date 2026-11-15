@@ -293,7 +293,7 @@ impl Builder<'_> {
             security["runAsGroup"] = json!(user);
         }
         security["readOnlyRootFilesystem"] = json!(service.read_only);
-        Ok(json!({
+        let mut container = json!({
             "name": name,
             "image": image,
             "imagePullPolicy": if service.candidate.is_some() { "Always" } else { "IfNotPresent" },
@@ -302,7 +302,12 @@ impl Builder<'_> {
             "volumeMounts": mounts,
             "resources": { "requests": { "cpu": "100m", "memory": "128Mi" }, "limits": { "memory": "1Gi" } },
             "securityContext": security,
-        }))
+        });
+        if let Some(port) = service.port {
+            container["startupProbe"] =
+                json!({ "tcpSocket": { "port": port }, "periodSeconds": 2, "failureThreshold": 90 });
+        }
+        Ok(container)
     }
 
     fn images(&mut self) -> Result<(), String> {
@@ -331,7 +336,7 @@ impl Builder<'_> {
                 "periodSeconds": 2,
                 "failureThreshold": 60,
             },
-            "resources": self.resources(&Resources { cpu: None, memory: None }),
+            "resources": self.resources(&builder_resources(&self.plan.config.images)),
             "securityContext": {
                 "runAsUser": buildkit_user,
                 "runAsGroup": buildkit_user,
@@ -569,6 +574,28 @@ fn absolute(path: &str) -> String {
 
 fn job_timeout(job: &Job, build_timeout: u64) -> u64 {
     job.timeout.map(|t| t.0).unwrap_or(build_timeout).min(build_timeout)
+}
+
+fn builder_resources(images: &[kiln_core::config::Image]) -> Resources {
+    let largest = |pick: fn(&Resources) -> &Option<String>| {
+        images
+            .iter()
+            .filter_map(|image| pick(&image.resources).clone())
+            .max_by(|a, b| quantity_value(a).partial_cmp(&quantity_value(b)).unwrap_or(std::cmp::Ordering::Equal))
+    };
+    Resources { cpu: largest(|r| &r.cpu), memory: largest(|r| &r.memory) }
+}
+
+fn quantity_value(quantity: &str) -> f64 {
+    let number = quantity.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    let scale = match &quantity[number.len()..] {
+        "m" => 0.001,
+        "Ki" => 1024.0,
+        "Mi" => 1024.0 * 1024.0,
+        "Gi" => 1024.0 * 1024.0 * 1024.0,
+        _ => 1.0,
+    };
+    number.parse::<f64>().unwrap_or(0.0) * scale
 }
 
 fn scale_quantity(quantity: &str, factor: u32) -> Option<String> {

@@ -77,6 +77,8 @@ pub struct Image {
     pub secrets: IndexMap<String, String>,
     #[serde(default)]
     pub labels: IndexMap<String, String>,
+    #[serde(default)]
+    pub resources: Resources,
 }
 
 impl Image {
@@ -90,6 +92,7 @@ impl Image {
             args: IndexMap::new(),
             secrets: IndexMap::new(),
             labels: IndexMap::new(),
+            resources: Resources::default(),
         }
     }
 }
@@ -171,6 +174,8 @@ pub struct Service {
     pub mounts: IndexMap<String, String>,
     #[serde(default)]
     pub expect_exit: Option<i32>,
+    #[serde(default)]
+    pub port: Option<u16>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -283,6 +288,16 @@ fn validate(config: &Config) -> Vec<Diagnostic> {
         for (field, value) in [("file", &image.file), ("context", &image.context)] {
             if let Err(message) = check_relative(value) {
                 out.push(diagnostic(format!("{at}.{field}"), message));
+            }
+        }
+        for (name, value) in [("cpu", &image.resources.cpu), ("memory", &image.resources.memory)] {
+            if let Some(value) = value
+                && !QUANTITY.is_match(value)
+            {
+                out.push(diagnostic(
+                    format!("{at}.resources.{name}"),
+                    format!("{value:?} is not a Kubernetes quantity"),
+                ));
             }
         }
         if image.platforms.is_empty() {

@@ -298,7 +298,7 @@ pub fn build_row(build: &Build, repo: Option<&Repo>, show_repo: bool) -> Markup 
 pub fn layout(title: &str, nav: &str, ctx: &Context<'_>, attrs: &[(&str, String)], content: Markup) -> Markup {
     let data: String = attrs.iter().map(|(k, v)| format!(" data-{k}=\"{}\"", html_escape(v))).collect();
     let item = |id: &str, href: &str, glyph: Icon, label: &str| {
-        html! { a class=(if nav == id { "active" } else { "" }) href=(href) aria-current=[(nav == id).then_some("page")] { (icon(glyph)) (label) } }
+        html! { a class=(if nav == id { "active" } else { "" }) href=(href) title=(label) aria-current=[(nav == id).then_some("page")] { (icon(glyph)) span class="label" { (label) } } }
     };
     html! {
         (DOCTYPE)
@@ -1597,6 +1597,7 @@ fn action(action: &str) -> (&'static str, Icon, &'static str) {
         "person_added" => ("gave access to", Icon::Users, "ok"),
         "person_removed" => ("removed access for", Icon::Users, "warn"),
         "kiln_claimed" => ("claimed Kiln", Icon::Key, "ok"),
+        "github_disconnected" => ("disconnected GitHub", Icon::Alert, "warn"),
         _ => ("", Icon::Activity, ""),
     }
 }
@@ -1680,6 +1681,7 @@ pub struct SettingsData {
     pub registry: String,
     pub registry_username: String,
     pub has_token: bool,
+    pub secrets_error: Option<String>,
     pub you: String,
 }
 
@@ -1703,6 +1705,11 @@ pub fn settings(ctx: &Context<'_>, data: &SettingsData) -> Markup {
                             }
                             div class="card-foot start" {
                                 a class="button" href={(app.html_url.trim_end_matches('/')) "/installations/new"} target="_blank" rel="noopener" { (icon(Icon::Book)) "Choose repositories" }
+                                form method="post" action="/settings/disconnect"
+                                    data-confirm="Kiln stops building and shows Connect GitHub. People and history stay; delete the old app on GitHub afterwards."
+                                    data-confirm-title="Disconnect GitHub?" data-confirm-action="Disconnect" data-confirm-danger {
+                                    button class="button danger" type="submit" { "Disconnect" }
+                                }
                             }
                         },
                         None => div class="empty compact" { p { "Not connected" } },
@@ -1711,10 +1718,15 @@ pub fn settings(ctx: &Context<'_>, data: &SettingsData) -> Markup {
                 section class="card" {
                     div class="card-head" {
                         h2 { (icon(Icon::Key)) "Registry" }
-                        @if data.has_token { span class="pill ok" { "Token saved" } } @else { span class="pill warn" { "No token" } }
+                        @if data.secrets_error.is_some() { span class="pill bad" { "Secrets failed" } }
+                        @else if data.has_token { span class="pill ok" { "Token saved" } }
+                        @else { span class="pill warn" { "No token" } }
                     }
                     form class="settings-form" method="post" action="/settings/registry"
                         data-confirm="Kiln restarts to use the new token. Running builds continue." data-confirm-title="Save the registry token?" data-confirm-action="Save" {
+                        @if let Some(error) = &data.secrets_error {
+                            div class="banner bad" { (icon(Icon::Alert)) div class="text" { strong { "Build pods cannot get the token" } span class="hint" { (error) } } }
+                        }
                         dl class="facts" { dt { "Publishes to" } dd { code { (data.registry) } } }
                         label class="field" { span { "Username" } input class="input" name="username" value=(data.registry_username) autocomplete="off" required; }
                         label class="field" {

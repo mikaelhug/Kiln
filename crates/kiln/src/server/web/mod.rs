@@ -69,6 +69,7 @@ pub fn router<P: Platform>(web: Arc<Web<P>>) -> Router {
         .route("/system/refresh", post(refresh::<P>))
         .route("/settings", get(settings_page::<P>))
         .route("/settings/registry", post(save_registry::<P>))
+        .route("/settings/disconnect", post(disconnect::<P>))
         .route("/settings/people", post(add_person::<P>))
         .route("/settings/people/{id}/remove", post(remove_person::<P>))
         .route("/events", get(events::<P>))
@@ -190,6 +191,7 @@ fn hash(token: &str) -> String {
 }
 
 pub struct User {
+    pub id: i64,
     pub login: String,
     pub avatar_url: String,
     pub session: String,
@@ -216,7 +218,7 @@ impl<P: Platform> FromRequestParts<Arc<Web<P>>> for User {
         if now - session.seen_at > 60 {
             store.touch_session(&id_hash, now)?;
         }
-        Ok(User { login: session.login, avatar_url: session.avatar_url, session: id_hash })
+        Ok(User { id: session.user_id, login: session.login, avatar_url: session.avatar_url, session: id_hash })
     }
 }
 
@@ -730,6 +732,13 @@ async fn settings_page<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) 
         registry: web.engine.settings.registry.clone(),
         registry_username: web.engine.settings.registry_username.clone(),
         has_token: web.engine.settings.registry_password.is_some(),
+        secrets_error: web
+            .engine
+            .platform
+            .status()
+            .into_iter()
+            .find(|(key, value)| *key == "Registry secrets" && value != "ok")
+            .map(|(_, value)| value),
         you: user.login.clone(),
     };
     Ok(render(views::settings(&context(&web, &viewer), &data)))
@@ -757,13 +766,32 @@ async fn save_registry<P: Platform>(
     }
     web.engine.store.set_registry(username, token)?;
     web.engine.audit(&user.login, "registry_token_saved", None, None, Some(username.to_owned()));
+    restart_soon();
+    Ok(flash("/settings", "Saved; Kiln restarts to use it"))
+}
+
+async fn disconnect<P: Platform>(
+    State(web): State<Arc<Web<P>>>,
+    user: User,
+    headers: HeaderMap,
+) -> WebResult<Response> {
+    same_origin(&web, &headers)?;
+    if web.demo {
+        return Ok(flash("/settings", "Not available in the demo"));
+    }
+    web.engine.store.disconnect_github()?;
+    web.engine.audit(&user.login, "github_disconnected", None, None, None);
+    restart_soon();
+    Ok(flash("/", "Disconnected; Kiln restarts"))
+}
+
+fn restart_soon() {
     tokio::spawn(async {
         tokio::time::sleep(Duration::from_millis(500)).await;
         super::RESTART.notify_one();
         tokio::time::sleep(Duration::from_secs(5)).await;
         std::process::exit(0);
     });
-    Ok(flash("/settings", "Saved; Kiln restarts to use it"))
 }
 
 #[derive(Deserialize)]
@@ -781,7 +809,11 @@ async fn add_person<P: Platform>(
     let login = form.login.trim().trim_start_matches('@');
     let found = match kiln_github::find_user(&web.engine.settings.github_api, login).await {
         Ok(found) => found,
-        Err(_) => return Ok(flash("/settings", &format!("No GitHub user named {login}"))),
+        Err(error) if error.is_not_found() => return Ok(flash("/settings", &format!("No GitHub user named {login}"))),
+        Err(error) => {
+            tracing::warn!(%error, "looking up a GitHub user failed");
+            return Ok(flash("/settings", "GitHub did not answer; try again in a minute"));
+        }
     };
     web.engine.store.add_person(&kiln_store::Person {
         user_id: found.id as i64,
@@ -856,13 +888,27 @@ async fn system<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebR
 
 async fn events<P: Platform>(
     State(web): State<Arc<Web<P>>>,
-    _user: User,
+    user: User,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
     let receiver = web.engine.logs.events().subscribe();
-    let stream = tokio_stream::wrappers::BroadcastStream::new(receiver).filter_map(|event| async move {
-        let event = event.ok()?;
-        Some(Ok(SseEvent::default().data(serde_json::to_string(&event).ok()?)))
-    });
+    let store = web.engine.store.clone();
+    let demo = web.demo;
+    let revoked = async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            let session = store.session(&user.session).ok().flatten();
+            let allowed = demo || store.is_person(user.id).unwrap_or(false);
+            if session.is_none() || !allowed {
+                return;
+            }
+        }
+    };
+    let stream = tokio_stream::wrappers::BroadcastStream::new(receiver)
+        .filter_map(|event| async move {
+            let event = event.ok()?;
+            Some(Ok(SseEvent::default().data(serde_json::to_string(&event).ok()?)))
+        })
+        .take_until(Box::pin(revoked));
     Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(20)))
 }
 

@@ -71,6 +71,7 @@ A release fails if its version would not be higher than the highest semver tag a
 | `args` | | build arguments |
 | `secrets` | | maps a BuildKit secret id to a key in the repository's secret |
 | `labels` | | added to Kiln's `org.opencontainers.image.*` labels |
+| `resources` | | `{ cpu = "4", memory = "8Gi" }` for BuildKit while it builds; the largest value across images wins |
 
 `args` and `labels` may use `${sha}`, `${short_sha}`, `${ref}`, `${version}` and `${run}`. Write `$${` for a literal `${`.
 
@@ -106,6 +107,7 @@ A service sets exactly one of `image` or `candidate`. `candidate` names one of t
 | `tmpfs` | memory-backed writable directories |
 | `mounts` | `{ "/container/path" = "dir/in/repo" }`, a directory of the repository mounted read-only |
 | `expect_exit` | exit code required when Kiln stops the service at the end of the build |
+| `port` | the job starts only once the service accepts connections on this port, such as `5432` for Postgres |
 
 ## Validate locally
 

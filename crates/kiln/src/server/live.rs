@@ -23,6 +23,7 @@ pub struct Live {
     claims: Api<PersistentVolumeClaim>,
     cache_class: Option<String>,
     cache_size: String,
+    registry_secrets: Option<String>,
 }
 
 const SELECTOR: &str = "app.kubernetes.io/managed-by=kiln";
@@ -42,6 +43,7 @@ impl Live {
         )?;
         let kube = kube::Client::try_default().await.context("connecting to the Kubernetes API")?;
         let namespace = &settings.runner.namespace;
+        let mut registry_secrets = None;
         if let Some(token) = &settings.registry_password {
             let secrets: Api<Secret> = Api::namespaced(kube.clone(), namespace);
             let host = settings.registry.split('/').next().unwrap_or_default();
@@ -60,6 +62,7 @@ impl Live {
                 ),
             ] {
                 if let Err(error) = put_secret(&secrets, name, kind, data).await {
+                    registry_secrets = Some(format!("{name}: {error:#}"));
                     tracing::error!(
                         error = format!("{error:#}"),
                         name,
@@ -76,6 +79,7 @@ impl Live {
             claims: Api::namespaced(kube, namespace),
             cache_class: settings.cache_class.clone(),
             cache_size: settings.cache_size.clone(),
+            registry_secrets,
         })
     }
 
@@ -125,7 +129,8 @@ impl Platform for Live {
             }
             _ => "not measured yet".into(),
         };
-        vec![("GitHub API", remaining)]
+        let secrets = self.registry_secrets.clone().map_or_else(|| "ok".into(), |error| format!("failed, {error}"));
+        vec![("GitHub API", remaining), ("Registry secrets", secrets)]
     }
 
     async fn repositories(&self) -> Result<Vec<RepoInfo>> {

@@ -31,7 +31,7 @@ There are no secrets to prepare: Kiln creates its GitHub App and keeps its crede
 | `network-policies.yaml` | the namespace of your ingress controller (`traefik`) that may reach the server, and the API server addresses |
 | `build-policy.yaml` | the ResourceQuota: at least `KILN_SLOTS` times the requests of your largest build |
 
-**The image.** Use the same release for the server image in `server.yaml` and for `KILN_IMAGE`, pinned by the digest from the release notes, for example `ghcr.io/mikaelhug/kiln:0.2.0@sha256:…`. The server and its in-pod helper speak a private protocol, so they must always match; upgrade both together.
+**The image.** Use the same release for the server image in `server.yaml` and for `KILN_IMAGE`, pinned by the digest from the release notes, for example `ghcr.io/mikaelhug/kiln:0.2.1@sha256:…`. The server and its in-pod helper speak a private protocol, so they must always match; upgrade both together.
 
 **The API server addresses.** Network policies see the address after DNAT, so allow both the service address and the API server's real address. Replace `10.96.0.1` and `192.0.2.10:6443` in `network-policies.yaml` with what these print:
 
@@ -55,7 +55,7 @@ Open your Kiln address. A fresh install shows **Connect GitHub** and asks for a 
 kubectl -n kiln logs deploy/kiln | grep code
 ```
 
-Enter it, optionally with an organization, and Kiln sends you to GitHub with its app filled in: permissions, events, webhook and sign-in. Click **Create GitHub App**. Back in Kiln, choose the repositories it may build and sign in. The account that created the app is the first person who can sign in.
+Enter it, optionally with an organization, and Kiln sends you to GitHub with its app filled in: permissions, events, webhook and sign-in. Click **Create GitHub App**. Back in Kiln, choose the repositories it may build and sign in. For an app on your personal account, you are the first person who can sign in. For an organization's app, the first person is whoever signs in from the browser that connected it; if that is lost, the first person to sign in claims Kiln with a new setup code from the log.
 
 ## 3. Add a registry token
 
@@ -131,6 +131,7 @@ Only `KILN_PUBLIC_URL` and `KILN_IMAGE` are required. Lists are comma-separated.
 | Builds fail to start with "exceeded quota" | Raise the ResourceQuota in `build-policy.yaml`, or lower `KILN_SLOTS` or job resources. |
 | GitHub is down | Builds wait. Kiln catches up from polling, and check runs are retried from an outbox. |
 | The registry token expires | Save a new one in **Settings › Registry**. |
+| The GitHub App was deleted or its key revoked | **Settings › GitHub › Disconnect**, then connect again. People and history stay. If nobody can sign in, delete Kiln's data volume instead. |
 | The database is lost | Kiln shows **Connect GitHub** again; connect a new app and delete the old one on GitHub. Version numbers continue from the registry; only history is lost. |
 | A release failed with "semver tags are immutable" | Someone or something already published that version with a different image. Release a new version. |
 | Upgrade Kiln | Change the server image and `KILN_IMAGE` to the new release together, ideally while no build runs. |
@@ -142,7 +143,7 @@ Kiln keeps its database, including the GitHub App's key and the registry token, 
 ## 8. Try it without a cluster
 
 ```bash
-docker run --rm -p 8080:8080 ghcr.io/mikaelhug/kiln:0.2.0 demo --bind 0.0.0.0
+docker run --rm -p 8080:8080 ghcr.io/mikaelhug/kiln:0.2.1 demo --bind 0.0.0.0
 ```
 
 The demo runs the real engine and UI against simulated repositories, builds and logs. It starts with a few days of build history and pushes a new commit every minute or so. Nothing outside your machine is contacted.

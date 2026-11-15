@@ -792,6 +792,11 @@ impl Store {
         Ok(inserted == 1)
     }
 
+    pub fn disconnect_github(&self) -> Result<()> {
+        self.conn().execute("DELETE FROM github WHERE id = 1", [])?;
+        Ok(())
+    }
+
     pub fn set_registry(&self, username: &str, token: &str) -> Result<()> {
         self.conn().execute(
             "UPDATE github SET registry_username = ?1, registry_token = ?2 WHERE id = 1",

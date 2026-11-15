@@ -20,7 +20,7 @@ steps = ["npm ci", "npm test"]
 [verify.smoke]
 image = "curlimages/curl:8"
 steps = ["curl -f http://127.0.0.1:8080/healthz"]
-services = [{ name = "app", candidate = "web", user = 10001, read_only = true, tmpfs = ["/data"] }]
+services = [{ name = "app", candidate = "web", user = 10001, read_only = true, tmpfs = ["/data"], port = 8080 }]
 "#;
 
 fn plan<'a>(config: &'a Config, scope: Scope, trusted: bool) -> Plan<'a> {

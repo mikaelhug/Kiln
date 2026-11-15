@@ -37,6 +37,9 @@
           },
           "type": "array"
         },
+        "resources": {
+          "$ref": "#/$defs/Resources"
+        },
         "secrets": {
           "additionalProperties": {
             "type": "string"
@@ -199,6 +202,16 @@
         },
         "name": {
           "type": "string"
+        },
+        "port": {
+          "default": null,
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "read_only": {
           "default": false,
