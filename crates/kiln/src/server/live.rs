@@ -17,17 +17,29 @@ use super::settings::{PULL_SECRET, PUSH_SECRET, Settings};
 
 const SERVICE_ACCOUNT: &str = "/var/run/secrets/kubernetes.io/serviceaccount";
 
-fn kubelet_client() -> Result<reqwest::Client> {
-    let ca = std::fs::read(format!("{SERVICE_ACCOUNT}/ca.crt")).context("reading the cluster CA")?;
-    let certificates = reqwest::Certificate::from_pem_bundle(&ca).context("parsing the cluster CA")?;
-    Ok(reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).tls_certs_only(certificates).build()?)
+fn kubelet_client() -> Option<reqwest::Client> {
+    let ca = std::fs::read(format!("{SERVICE_ACCOUNT}/ca.crt")).ok()?;
+    let certificates = reqwest::Certificate::from_pem_bundle(&ca).ok()?;
+    reqwest::Client::builder().timeout(std::time::Duration::from_secs(4)).tls_certs_only(certificates).build().ok()
+}
+
+async fn kubelet_summary(client: &reqwest::Client, node: &str, token: &str) -> Result<serde_json::Value> {
+    Ok(client
+        .get(format!("https://{node}:10250/stats/summary?only_cpu_and_memory=true"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .with_context(|| format!("reading usage from the kubelet on {node}"))?
+        .json()
+        .await?)
 }
 
 pub struct Live {
     github: Client,
     registry: Registry,
     pods: Api<Pod>,
-    kubelet: reqwest::Client,
+    kubelet: Option<reqwest::Client>,
     namespace: String,
     secrets: Api<Secret>,
     claims: Api<PersistentVolumeClaim>,
@@ -85,7 +97,7 @@ impl Live {
             github,
             registry,
             pods: Api::namespaced(kube.clone(), namespace),
-            kubelet: kubelet_client()?,
+            kubelet: kubelet_client(),
             namespace: namespace.clone(),
             secrets: Api::namespaced(kube.clone(), namespace),
             claims: Api::namespaced(kube, namespace),
@@ -278,29 +290,35 @@ impl Platform for Live {
     }
 
     async fn pod_usage(&self) -> Result<Vec<ContainerUsage>> {
+        let client = self.kubelet.as_ref().context("the cluster CA is not mounted, so kubelets cannot be verified")?;
         let pods = self.pods.list(&ListParams::default().labels(&format!("{MANAGED_BY}=kiln"))).await?;
         let nodes: std::collections::BTreeSet<String> =
             pods.items.iter().filter_map(|p| p.status.as_ref()?.host_ip.clone()).collect();
         let token =
             std::fs::read_to_string(format!("{SERVICE_ACCOUNT}/token")).context("reading the service account token")?;
+        let answers =
+            futures::future::join_all(nodes.iter().map(|node| kubelet_summary(client, node, token.trim()))).await;
         let mut out = Vec::new();
-        for node in nodes {
-            let summary: serde_json::Value = self
-                .kubelet
-                .get(format!("https://{node}:10250/stats/summary"))
-                .bearer_auth(token.trim())
-                .send()
-                .await
-                .and_then(reqwest::Response::error_for_status)
-                .with_context(|| format!("reading usage from the kubelet on {node}"))?
-                .json()
-                .await?;
+        let mut failure = None;
+        for answer in answers {
+            let summary = match answer {
+                Ok(summary) => summary,
+                Err(error) => {
+                    failure = Some(error);
+                    continue;
+                }
+            };
             for pod in summary["pods"].as_array().into_iter().flatten() {
                 if pod["podRef"]["namespace"].as_str() != Some(self.namespace.as_str()) {
                     continue;
                 }
                 let name = pod["podRef"]["name"].as_str().unwrap_or_default();
                 for container in pod["containers"].as_array().into_iter().flatten() {
+                    let (Some(cpu), Some(memory)) =
+                        (container["cpu"]["usageNanoCores"].as_f64(), container["memory"]["workingSetBytes"].as_f64())
+                    else {
+                        continue;
+                    };
                     let at = container["cpu"]["time"]
                         .as_str()
                         .and_then(|t| t.parse::<kiln_runner::k8s_openapi::jiff::Timestamp>().ok())
@@ -309,13 +327,16 @@ impl Platform for Live {
                         at,
                         pod: name.to_owned(),
                         container: container["name"].as_str().unwrap_or_default().to_owned(),
-                        cpu: container["cpu"]["usageNanoCores"].as_f64().unwrap_or_default() / 1e9,
-                        memory: container["memory"]["workingSetBytes"].as_f64().unwrap_or_default(),
+                        cpu: cpu / 1e9,
+                        memory,
                     });
                 }
             }
         }
-        Ok(out)
+        match failure {
+            Some(error) if out.is_empty() => Err(error),
+            _ => Ok(out),
+        }
     }
 
     async fn create_pod(&self, pod: &Pod) -> Result<()> {
