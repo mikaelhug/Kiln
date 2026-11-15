@@ -139,6 +139,18 @@ async fn pull_requests_only_run_tests_and_never_release() {
 }
 
 #[tokio::test]
+async fn without_a_registry_token_releases_wait_while_pull_requests_still_run() {
+    let h = harness_with(|s| s.registry_password = None).await;
+    h.fake.push(1, &sha(1), "Ready", Some(CONFIG));
+    h.fake.open_pull(1, 7, &sha(2), "Try a thing", CONFIG);
+    h.sync().await;
+    let builds = h.until("the PR build", |b| b.len() == 2 && b.iter().any(|b| b.state == BuildState::Succeeded)).await;
+    let main = builds.iter().find(|b| b.trigger == Trigger::Push).unwrap();
+    assert_eq!(main.state, BuildState::Queued);
+    assert_eq!(main.detail.as_deref(), Some(super::engine::WAITING_FOR_TOKEN));
+}
+
+#[tokio::test]
 async fn a_tag_on_a_verified_commit_releases_the_same_image_without_rebuilding() {
     let h = harness().await;
     h.fake.push(1, &sha(1), "Ready", Some(CONFIG));

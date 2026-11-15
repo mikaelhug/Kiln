@@ -33,6 +33,10 @@ pub enum Error {
 }
 
 impl Error {
+    pub fn is_denied(&self) -> bool {
+        matches!(self, Error::Status { status, .. } if *status == StatusCode::UNAUTHORIZED || *status == StatusCode::FORBIDDEN)
+    }
+
     pub fn is_transient(&self) -> bool {
         match self {
             Error::Status { status, .. } => status.is_server_error() || *status == StatusCode::TOO_MANY_REQUESTS,

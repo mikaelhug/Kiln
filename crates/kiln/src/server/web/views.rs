@@ -1181,6 +1181,9 @@ pub fn build(ctx: &Context<'_>, data: &BuildData) -> Markup {
 
 fn no_tasks_message(build: &Build) -> &'static str {
     match build.state {
+        BuildState::Queued if build.detail.as_deref() == Some(crate::server::engine::WAITING_FOR_TOKEN) => {
+            crate::server::engine::WAITING_FOR_TOKEN
+        }
         BuildState::Queued => "Waiting for a build slot",
         BuildState::Skipped => "Skipped",
         BuildState::Failed if build.failure == Some(Failure::Config) => "Invalid configuration",
@@ -1733,7 +1736,12 @@ pub fn settings(ctx: &Context<'_>, data: &SettingsData) -> Markup {
                             span { "Token" }
                             input class="input" type="password" name="token" autocomplete="new-password" required placeholder=(if data.has_token { "Saved; enter a new one to replace it" } else { "write:packages" });
                         }
-                        button class="button primary" type="submit" disabled[ctx.demo] { "Save token" }
+                        div class="actions" {
+                            button class="button primary" type="submit" disabled[ctx.demo] { "Save token" }
+                            @if data.registry.starts_with("ghcr.io/") {
+                                a class="button" href={(ctx.github_web) "/settings/tokens/new?scopes=write:packages&description=Kiln"} target="_blank" rel="noopener" { (PreEscaped(GITHUB)) "Create token" }
+                            }
+                        }
                     }
                 }
                 section class="card wide" {

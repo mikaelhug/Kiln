@@ -24,6 +24,7 @@ pub fn headline(build: &Build) -> String {
         BuildState::Queued if detail.starts_with("Retrying") => {
             format!("Retrying: {}", detail.trim_start_matches("Retrying: "))
         }
+        BuildState::Queued if detail.starts_with("Waiting") => detail,
         BuildState::Queued => "Waiting for a build slot".into(),
         BuildState::Starting | BuildState::Running => phase_label(build.phase).into(),
         BuildState::Releasing => format!("Releasing {}", build.version.clone().unwrap_or_default()),

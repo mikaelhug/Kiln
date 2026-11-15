@@ -591,9 +591,19 @@ impl<P: Platform> Engine<P> {
 
     fn next(&self) -> Result<Option<i64>> {
         let paused: HashSet<i64> = self.store.repos()?.into_iter().filter(|r| r.paused).map(|r| r.id).collect();
-        let queued: Vec<schedule::Queued> = self
-            .store
-            .queued()?
+        let mut queued = self.store.queued()?;
+        if self.settings.registry_password.is_none() {
+            for build in queued.iter().filter(|b| b.trigger != Trigger::PullRequest) {
+                if build.detail.as_deref() != Some(WAITING_FOR_TOKEN) {
+                    self.update(
+                        build.id,
+                        BuildUpdate { detail: Some(Some(WAITING_FOR_TOKEN.into())), ..Default::default() },
+                    )?;
+                }
+            }
+            queued.retain(|b| b.trigger == Trigger::PullRequest);
+        }
+        let queued: Vec<schedule::Queued> = queued
             .into_iter()
             .filter(|b| !paused.contains(&b.repo_id))
             .map(|b| schedule::Queued {
@@ -647,6 +657,7 @@ impl<P: Platform> Engine<P> {
                 }
                 if let Some(refusal) = error.downcast_ref::<Refusal>() {
                     self.finish(id, BuildState::Failed, Some(refusal.failure), Some(refusal.message.clone()))?;
+                    return Ok(());
                 } else if build.attempt < self.settings.max_attempts {
                     self.update(
                         id,
@@ -675,17 +686,10 @@ impl<P: Platform> Engine<P> {
         let names: Vec<String> = config.images.iter().map(|i| i.name.clone()).collect();
         let pull_request = build.trigger == Trigger::PullRequest;
         if !pull_request && !build.trusted {
-            return Err(Refusal::config(format!(
-                "{} points at a commit that is not on {}; Kiln only builds and releases tags reachable from the default branch",
+            return Err(Refusal::version(format!(
+                "{} points at a commit that is not on {}; Kiln only releases tags reachable from the default branch",
                 build.ref_name, repo.default_branch
             ))
-            .into());
-        }
-        if !pull_request && self.settings.registry_password.is_none() {
-            return Err(Refusal {
-                failure: Failure::Release,
-                message: "Add a registry token in Settings so Kiln can publish images".into(),
-            }
             .into());
         }
         if !pull_request {
@@ -710,10 +714,7 @@ impl<P: Platform> Engine<P> {
             && images.iter().map(|i| &i.name).eq(names.iter())
         {
             let version = version::tag_version(&build.ref_name).map_err(|e| Refusal::version(e.to_string()))?;
-            let mut published = Vec::new();
-            for image in &config.images {
-                published.extend(self.platform.registry_tags(&self.settings.repository_for(&image.name)).await?);
-            }
+            let published = self.published(&config).await?;
             version::assess(&version.version, &published).map_err(|e| Refusal::version(e.to_string()))?;
             for image in &images {
                 if let Some(digest) = &image.digest {
@@ -782,7 +783,7 @@ impl<P: Platform> Engine<P> {
         if let Err(error) = self.platform.create_pod(&rendered.pod).await {
             if let Some(rejected) = error.downcast_ref::<PodRejected>() {
                 self.forget_fetch_token(build.id, build.attempt).await;
-                return Err(Refusal::config(format!("Kubernetes refused the build pod: {rejected}")).into());
+                return Err(Refusal::setup(format!("Kubernetes refused the build pod: {rejected}")).into());
             }
             return Err(error);
         }
@@ -813,11 +814,26 @@ impl<P: Platform> Engine<P> {
         Ok(())
     }
 
-    async fn allocate(&self, repo: &Repo, build: &Build, config: &Config) -> Result<Option<String>> {
+    async fn published(&self, config: &Config) -> Result<Vec<String>> {
         let mut published = Vec::new();
         for image in &config.images {
-            published.extend(self.platform.registry_tags(&self.settings.repository_for(&image.name)).await?);
+            let repository = self.settings.repository_for(&image.name);
+            match self.platform.registry_tags(&repository).await {
+                Ok(tags) => published.extend(tags),
+                Err(error) if error.downcast_ref::<kiln_registry::Error>().is_some_and(|e| e.is_denied()) => {
+                    return Err(Refusal::setup(format!(
+                        "The registry refused the token for {repository}; save a token that can publish there in Settings"
+                    ))
+                    .into());
+                }
+                Err(error) => return Err(error),
+            }
         }
+        Ok(published)
+    }
+
+    async fn allocate(&self, repo: &Repo, build: &Build, config: &Config) -> Result<Option<String>> {
+        let published = self.published(config).await?;
         let allocation = match build.trigger {
             Trigger::Tag => version::tag_version(&build.ref_name).map_err(|e| Refusal::version(e.to_string()))?,
             _ if config.release.mode == ReleaseMode::Tags => return Ok(None),
@@ -1411,7 +1427,13 @@ impl<P: Platform> Engine<P> {
                     } else {
                         self.store.outbox_retry(item.id, now() + delay, &format!("{error:#}"))?;
                     }
-                    tracing::warn!(error = format!("{error:#}"), build = item.build_id, "GitHub check update failed");
+                    if item.attempts > 0 {
+                        tracing::warn!(
+                            error = format!("{error:#}"),
+                            build = item.build_id,
+                            "GitHub check update failed"
+                        );
+                    }
                 }
             }
         }
@@ -1548,6 +1570,8 @@ impl<P: Platform> Engine<P> {
     }
 }
 
+pub const WAITING_FOR_TOKEN: &str = "Waiting for a registry token in Settings";
+
 #[derive(Debug)]
 pub struct Refusal {
     pub failure: Failure,
@@ -1561,6 +1585,10 @@ impl Refusal {
 
     fn version(message: impl Into<String>) -> Self {
         Self { failure: Failure::Version, message: message.into() }
+    }
+
+    fn setup(message: impl Into<String>) -> Self {
+        Self { failure: Failure::Setup, message: message.into() }
     }
 }
 

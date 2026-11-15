@@ -8,7 +8,9 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 - `KILN_IMAGE` is optional: a release knows its own image, so image automation only updates the server image.
 - A service that stops or never opens its `port` fails the build instead of waiting for the timeout.
 - `services.port` must be 1 to 65535.
-- A missing registry token shows as such on GitHub instead of ".kiln.toml has errors".
+- Without a registry token, default-branch builds wait and start once one is saved; pull requests still run.
+- **Settings › Registry** links to GitHub with the token's scope filled in.
+- A registry that refuses the token, Kubernetes refusing a build pod, and a tag outside the default branch each show their own reason instead of ".kiln.toml has errors", and are no longer logged as warnings.
 
 ## 0.2.1
 

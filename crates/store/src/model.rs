@@ -86,6 +86,7 @@ text_enum!(Failure, Infra, {
     Image => "image",
     Version => "version",
     Release => "release",
+    Setup => "setup",
     Infra => "infra",
 });
 
