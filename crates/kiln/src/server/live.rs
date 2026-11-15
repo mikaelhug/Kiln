@@ -6,19 +6,20 @@ use futures::{AsyncReadExt, StreamExt};
 use kiln_github::{CheckRun, Client, Compare, Conditional, Head, PullRequest, TagRef, Token};
 use kiln_registry::{Promotion, Registry};
 use kiln_runner::k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod, Secret};
-use kiln_runner::{BUILD_LABEL, MANAGED_BY};
+use kiln_runner::{BUILD_LABEL, MANAGED_BY, quantity_value};
 use kiln_store::Repo;
-use kube::api::{DeleteParams, ListParams, LogParams, PostParams};
+use kube::api::{ApiResource, DeleteParams, DynamicObject, GroupVersionKind, ListParams, LogParams, PostParams};
 use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Api, ResourceExt};
 
-use super::platform::{Platform, PodEvent, PodRejected, RepoInfo};
+use super::platform::{ContainerUsage, Platform, PodEvent, PodRejected, RepoInfo};
 use super::settings::{PULL_SECRET, PUSH_SECRET, Settings};
 
 pub struct Live {
     github: Client,
     registry: Registry,
     pods: Api<Pod>,
+    pod_metrics: Api<DynamicObject>,
     secrets: Api<Secret>,
     claims: Api<PersistentVolumeClaim>,
     cache_class: Option<String>,
@@ -75,6 +76,14 @@ impl Live {
             github,
             registry,
             pods: Api::namespaced(kube.clone(), namespace),
+            pod_metrics: Api::namespaced_with(
+                kube.clone(),
+                namespace,
+                &ApiResource::from_gvk_with_plural(
+                    &GroupVersionKind::gvk("metrics.k8s.io", "v1beta1", "PodMetrics"),
+                    "pods",
+                ),
+            ),
             secrets: Api::namespaced(kube.clone(), namespace),
             claims: Api::namespaced(kube, namespace),
             cache_class: settings.cache_class.clone(),
@@ -263,6 +272,27 @@ impl Platform for Live {
             Err(error) if is_status(&error, 404) => Ok(()),
             Err(error) => Err(error.into()),
         }
+    }
+
+    async fn pod_usage(&self) -> Result<Vec<ContainerUsage>> {
+        let list = self
+            .pod_metrics
+            .list(&ListParams::default().labels(&format!("{MANAGED_BY}=kiln")))
+            .await
+            .context("reading build pod metrics")?;
+        let mut out = Vec::new();
+        for pod in &list.items {
+            for container in pod.data["containers"].as_array().into_iter().flatten() {
+                let read = |key: &str| container["usage"][key].as_str().map(quantity_value).unwrap_or_default();
+                out.push(ContainerUsage {
+                    pod: pod.name_any(),
+                    container: container["name"].as_str().unwrap_or_default().to_owned(),
+                    cpu: read("cpu"),
+                    memory: read("memory"),
+                });
+            }
+        }
+        Ok(out)
     }
 
     async fn create_pod(&self, pod: &Pod) -> Result<()> {

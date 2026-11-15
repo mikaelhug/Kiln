@@ -318,6 +318,17 @@ struct DashboardQuery {
     before: Option<i64>,
 }
 
+fn live_info<P: Platform>(web: &Web<P>, build: &kiln_store::Build, history: &[kiln_store::Build]) -> views::Live {
+    let pull_request = build.trigger == Trigger::PullRequest;
+    let similar: Vec<kiln_store::Build> = history
+        .iter()
+        .filter(|b| b.repo_id == build.repo_id && (b.trigger == Trigger::PullRequest) == pull_request)
+        .take(20)
+        .cloned()
+        .collect();
+    views::Live { estimate: views::median(&similar), samples: web.engine.usage.history(build.id) }
+}
+
 fn dashboard_data<P: Platform>(web: &Web<P>, query: &DashboardQuery) -> WebResult<views::DashboardData> {
     let store = &web.engine.store;
     let page = 30;
@@ -371,7 +382,9 @@ fn dashboard_data<P: Platform>(web: &Web<P>, query: &DashboardQuery) -> WebResul
         },
         recent: judged.iter().take(30).rev().map(|b| b.state).collect(),
     };
+    let live = active.iter().map(|b| (b.id, live_info(web, b, &finished))).collect();
     Ok(views::DashboardData {
+        live,
         repos,
         active,
         queued,
@@ -512,7 +525,18 @@ fn build_data<P: Platform>(
             |b: &kiln_store::Build| (b.trigger == Trigger::PullRequest, b.trigger != Trigger::Tag, b.created_at, b.id);
         store.queued().map(|queued| queued.iter().filter(|other| rank(other) < rank(&build)).count()).unwrap_or(0)
     });
-    Ok(views::BuildData { ahead, repo, build, attempt, tasks, images, rerun_of })
+    let live = build.state.is_active().then(|| {
+        let history = store
+            .builds(&BuildFilter {
+                repo: Some(build.repo_id),
+                states: vec![BuildState::Succeeded],
+                limit: 40,
+                ..Default::default()
+            })
+            .unwrap_or_default();
+        live_info(web, &build, &history)
+    });
+    Ok(views::BuildData { ahead, repo, build, attempt, tasks, images, rerun_of, live })
 }
 
 async fn build_page<P: Platform>(

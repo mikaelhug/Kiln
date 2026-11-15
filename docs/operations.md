@@ -10,13 +10,14 @@ This guide takes you from nothing to a first build. Kiln ships as one image, `gh
 - **A CSI storage class with `ReadWriteOncePod`** for Kiln's database, and one with `ReadWriteOnce` for build caches.
 - **A way in from the internet:** the Gateway API with a Gateway that accepts routes from the `kiln` namespace, or an Ingress controller. GitHub must reach `/hooks/github`, and your browser the UI.
 - **An OCI registry**, such as GitHub Container Registry.
+- **Optional: metrics-server**, for live CPU and memory of running builds and each task's peak use.
 - **Optional: gVisor** (a `gvisor` RuntimeClass) to sandbox pull request builds.
 
 ## 1. Deploy
 
 `deploy/kubernetes` is a kustomization with everything Kiln needs:
 - the namespaces and their Pod Security levels;
-- RBAC that lets Kiln manage pods, pod logs, secrets and cache claims in `kiln-builds`. Kiln can create and delete secrets there but never read them;
+- RBAC that lets Kiln manage pods, pod logs, secrets and cache claims in `kiln-builds`, and read the build pods' CPU and memory use. Kiln can create and delete secrets there but never read them;
 - a ValidatingAdmissionPolicy that refuses build pods with a service account token, host namespaces, host paths, privileged containers or added capabilities;
 - a PriorityClass and a ResourceQuota for builds;
 - the network policies, the server, its storage and its route;

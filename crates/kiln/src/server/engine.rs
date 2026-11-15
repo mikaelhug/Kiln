@@ -21,6 +21,7 @@ use tokio::sync::{Notify, mpsc};
 use super::logs::{Event, Logs};
 use super::platform::{Platform, PodEvent, PodRejected};
 use super::settings::Settings;
+use super::usage::{Sample, Usage};
 
 const PULL_GRACE_SECS: i64 = 180;
 const PENDING_LIMIT_SECS: i64 = 15 * 60;
@@ -39,6 +40,7 @@ pub struct Engine<P: Platform> {
     fetch_tokens: Mutex<HashMap<(i64, i64), String>>,
     releasing: Mutex<HashSet<i64>>,
     dispatching: Mutex<HashSet<i64>>,
+    pub usage: Usage,
 }
 
 fn now() -> i64 {
@@ -66,6 +68,7 @@ impl<P: Platform> Engine<P> {
             fetch_tokens: Mutex::new(HashMap::new()),
             releasing: Mutex::new(HashSet::new()),
             dispatching: Mutex::new(HashSet::new()),
+            usage: Usage::default(),
         })
     }
 
@@ -80,6 +83,8 @@ impl<P: Platform> Engine<P> {
         tokio::spawn(async move { engine.outbox_loop().await });
         let engine = self.clone();
         tokio::spawn(async move { engine.housekeeping_loop().await });
+        let engine = self.clone();
+        tokio::spawn(async move { engine.usage_loop().await });
     }
 
     pub fn poke(&self, repo: Option<i64>) {
@@ -87,6 +92,9 @@ impl<P: Platform> Engine<P> {
     }
 
     fn changed(&self, build: &Build) {
+        if build.state.is_finished() {
+            self.usage.forget(build.id);
+        }
         let _ = self.logs.events().send(Event::Build { build: build.id, repo: build.repo_id });
         if let Err(error) = self.store.enqueue(build.id, "check", &serde_json::json!({}), now()) {
             tracing::warn!(%error, build = build.id, "queueing the GitHub check update failed");
@@ -780,6 +788,7 @@ impl<P: Platform> Engine<P> {
         };
         let rendered = kiln_runner::render(&plan, &self.settings.runner).map_err(Refusal::config)?;
         self.store.replace_tasks(build.id, build.attempt, &rendered.tasks)?;
+        self.record_memory_limits(build, &rendered.pod)?;
         let name = pod_name(build.id, build.attempt);
         if let Err(error) = self.platform.create_pod(&rendered.pod).await {
             if let Some(rejected) = error.downcast_ref::<PodRejected>() {
@@ -1462,6 +1471,67 @@ impl<P: Platform> Engine<P> {
                 Ok(())
             }
         }
+    }
+
+    fn record_memory_limits(&self, build: &Build, pod: &Pod) -> Result<()> {
+        let containers = pod.spec.as_ref().and_then(|s| s.init_containers.clone()).unwrap_or_default();
+        let limit = |name: &str| {
+            containers
+                .iter()
+                .find(|c| c.name == name)
+                .and_then(|c| c.resources.as_ref()?.limits.as_ref()?.get("memory").map(|q| q.0.clone()))
+                .map(|q| kiln_runner::quantity_value(&q) as i64)
+        };
+        for task in self.store.tasks(build.id, build.attempt)? {
+            let source = if task.kind == TaskKind::Image { "buildkitd" } else { task.container.as_str() };
+            if let Some(bytes) = limit(source) {
+                self.store.set_task_memory_limit(build.id, build.attempt, &task.container, bytes)?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn usage_loop(self: Arc<Self>) {
+        let mut tick = tokio::time::interval(Duration::from_secs(10));
+        loop {
+            tick.tick().await;
+            if let Err(error) = self.sample_usage().await {
+                tracing::debug!(error = format!("{error:#}"), "reading build usage failed");
+            }
+        }
+    }
+
+    async fn sample_usage(&self) -> Result<()> {
+        let running: Vec<Build> = self.store.active()?.into_iter().filter(|b| b.pod.is_some()).collect();
+        if running.is_empty() {
+            return Ok(());
+        }
+        let usage = self.platform.pod_usage().await?;
+        for build in running {
+            let pod = build.pod.as_deref().unwrap_or_default();
+            let containers: Vec<_> = usage.iter().filter(|u| u.pod == pod).collect();
+            if containers.is_empty() {
+                continue;
+            }
+            let cpu: f64 = containers.iter().map(|c| c.cpu).sum();
+            let memory: f64 = containers.iter().map(|c| c.memory).sum();
+            self.usage.record(build.id, Sample { at: now(), cpu, memory });
+            let tasks = self.store.tasks(build.id, build.attempt)?;
+            for task in tasks.iter().filter(|t| t.state == TaskState::Running) {
+                let source = if task.kind == TaskKind::Image { "buildkitd" } else { task.container.as_str() };
+                if let Some(used) = containers.iter().find(|c| c.container == source) {
+                    self.store.raise_task_peak(
+                        build.id,
+                        build.attempt,
+                        task.ordinal,
+                        (used.cpu * 1000.0).round() as i64,
+                        used.memory as i64,
+                    )?;
+                }
+            }
+            let _ = self.logs.events().send(Event::Usage { build: build.id, repo: build.repo_id, cpu, memory });
+        }
+        Ok(())
     }
 
     async fn housekeeping_loop(self: Arc<Self>) {

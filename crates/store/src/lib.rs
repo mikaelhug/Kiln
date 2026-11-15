@@ -409,10 +409,29 @@ impl Store {
         Ok(())
     }
 
+    pub fn raise_task_peak(&self, build: i64, attempt: i64, ordinal: i64, cpu_milli: i64, memory: i64) -> Result<()> {
+        self.conn().execute(
+            "UPDATE tasks SET peak_cpu_milli = MAX(COALESCE(peak_cpu_milli, 0), ?4),
+                              peak_memory = MAX(COALESCE(peak_memory, 0), ?5)
+             WHERE build_id = ?1 AND attempt = ?2 AND ordinal = ?3",
+            params![build, attempt, ordinal, cpu_milli, memory],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_task_memory_limit(&self, build: i64, attempt: i64, container: &str, bytes: i64) -> Result<()> {
+        self.conn().execute(
+            "UPDATE tasks SET memory_limit = ?4 WHERE build_id = ?1 AND attempt = ?2 AND container = ?3",
+            params![build, attempt, container, bytes],
+        )?;
+        Ok(())
+    }
+
     pub fn tasks(&self, build: i64, attempt: i64) -> Result<Vec<Task>> {
         let conn = self.conn();
         let mut statement = conn.prepare(
-            "SELECT ordinal, kind, name, container, state, exit_code, reason, started_at, finished_at, log_final, log_bytes
+            "SELECT ordinal, kind, name, container, state, exit_code, reason, started_at, finished_at, log_final, log_bytes,
+                    peak_cpu_milli, peak_memory, memory_limit
              FROM tasks WHERE build_id = ?1 AND attempt = ?2 ORDER BY ordinal",
         )?;
         let mut tasks: Vec<Task> = statement
@@ -429,6 +448,9 @@ impl Store {
                     finished_at: row.get(8)?,
                     log_final: row.get(9)?,
                     log_bytes: row.get(10)?,
+                    peak_cpu_milli: row.get(11)?,
+                    peak_memory: row.get(12)?,
+                    memory_limit: row.get(13)?,
                     steps: Vec::new(),
                 })
             })?

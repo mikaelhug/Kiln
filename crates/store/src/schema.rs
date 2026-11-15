@@ -199,6 +199,11 @@ CREATE TABLE people (
     r"
 ALTER TABLE github ADD COLUMN registry_expires INTEGER;
 ",
+    r"
+ALTER TABLE tasks ADD COLUMN peak_cpu_milli INTEGER;
+ALTER TABLE tasks ADD COLUMN peak_memory INTEGER;
+ALTER TABLE tasks ADD COLUMN memory_limit INTEGER;
+",
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

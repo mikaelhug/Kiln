@@ -13,7 +13,7 @@ use kiln_store::Repo;
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
-use super::platform::{Platform, PodEvent, RepoInfo};
+use super::platform::{ContainerUsage, Platform, PodEvent, RepoInfo};
 
 #[derive(Debug, Clone)]
 pub struct Pace {
@@ -532,6 +532,26 @@ impl Platform for Arc<Fake> {
     async fn delete_secret(&self, name: &str) -> Result<()> {
         self.state().secrets.remove(name);
         Ok(())
+    }
+
+    async fn pod_usage(&self) -> Result<Vec<ContainerUsage>> {
+        let now = unix_now() as f64;
+        let mut out = Vec::new();
+        for (pod, spec) in &self.state().pods {
+            let statuses = spec.status.as_ref().and_then(|s| s.init_container_statuses.clone()).unwrap_or_default();
+            for status in statuses.iter().filter(|s| s.state.as_ref().is_some_and(|state| state.running.is_some())) {
+                let seed = status.name.bytes().map(f64::from).sum::<f64>();
+                let wave = ((now / 7.0 + seed).sin() + 1.0) / 2.0;
+                let heavy = status.name == "buildkitd" || status.name.starts_with("test-");
+                out.push(ContainerUsage {
+                    pod: pod.clone(),
+                    container: status.name.clone(),
+                    cpu: if heavy { 0.6 + 2.4 * wave } else { 0.02 + 0.05 * wave },
+                    memory: if heavy { 7.0e8 + 1.6e9 * wave } else { 2.0e7 + 1.0e7 * wave },
+                });
+            }
+        }
+        Ok(out)
     }
 
     async fn create_pod(&self, pod: &Pod) -> Result<()> {

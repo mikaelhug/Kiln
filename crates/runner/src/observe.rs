@@ -234,6 +234,9 @@ mod tests {
             finished_at: None,
             log_final: false,
             log_bytes: None,
+            peak_cpu_milli: None,
+            peak_memory: None,
+            memory_limit: None,
             steps: Vec::new(),
         }
     }

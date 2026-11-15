@@ -260,6 +260,9 @@ pub struct Task {
     pub finished_at: Option<i64>,
     pub log_final: bool,
     pub log_bytes: Option<i64>,
+    pub peak_cpu_milli: Option<i64>,
+    pub peak_memory: Option<i64>,
+    pub memory_limit: Option<i64>,
     pub steps: Vec<Step>,
 }
 

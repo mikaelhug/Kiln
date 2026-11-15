@@ -53,6 +53,50 @@ function tickDurations() {
   for (const el of document.querySelectorAll("[data-started]")) {
     el.textContent = duration(now - Number(el.dataset.started));
   }
+  for (const bar of document.querySelectorAll(".progress[data-since]")) {
+    const elapsed = now - Number(bar.dataset.since);
+    const estimate = Number(bar.dataset.estimate || 0);
+    const eta = bar.parentElement.querySelector("[data-eta]");
+    if (!estimate) continue;
+    const share = Math.min(elapsed / estimate, 0.97);
+    bar.firstElementChild.style.transform = `scaleX(${share.toFixed(4)})`;
+    bar.classList.toggle("over", elapsed > estimate);
+    if (eta) eta.textContent = elapsed < estimate ? `~${duration(estimate - elapsed)} left` : "Longer than usual";
+  }
+}
+
+function cpuText(cores) {
+  return cores < 0.095 ? `${Math.round(cores * 1000)}m CPU` : `${cores.toFixed(1)} CPU`;
+}
+
+function memoryText(bytes) {
+  const gib = bytes / 1073741824;
+  return gib >= 1 ? `${gib.toFixed(1)} GiB` : `${Math.round(bytes / 1048576)} MiB`;
+}
+
+function drawUsage(el) {
+  let points = [];
+  try { points = JSON.parse(el.dataset.points || "[]"); } catch (_) {}
+  const line = (index) => {
+    const values = points.map((p) => p[index]);
+    const top = Math.max(...values, 0) || 1;
+    const step = values.length > 1 ? 100 / (values.length - 1) : 0;
+    return values.map((v, i) => `${(i * step).toFixed(1)},${(22 - (v / top) * 20).toFixed(1)}`).join(" ");
+  };
+  el.querySelector("polyline.cpu")?.setAttribute("points", line(0));
+  el.querySelector("polyline.mem")?.setAttribute("points", line(1));
+}
+
+function onUsage(event) {
+  for (const el of document.querySelectorAll(`[data-usage="${event.build}"]`)) {
+    let points = [];
+    try { points = JSON.parse(el.dataset.points || "[]"); } catch (_) {}
+    points.push([event.cpu, event.memory]);
+    el.dataset.points = JSON.stringify(points.slice(-60));
+    el.querySelector(".cpu .v").textContent = cpuText(event.cpu);
+    el.querySelector(".mem .v").textContent = memoryText(event.memory);
+    drawUsage(el);
+  }
 }
 
 function toast(text, tone = "ok") {
@@ -484,6 +528,7 @@ function applyFilter(input) {
 }
 
 function enhance(root) {
+  for (const el of root.querySelectorAll("[data-usage]")) drawUsage(el);
   for (const form of root.querySelectorAll("form[method='post'], form[method='POST']")) {
     if (!once(form, "submit")) continue;
     form.addEventListener("submit", async (event) => {
@@ -640,7 +685,9 @@ function connect() {
 
 function onEvent(message) {
   const event = JSON.parse(message.data);
-  if (event.type === "resync") {
+  if (event.type === "usage") {
+    onUsage(event);
+  } else if (event.type === "resync") {
     refreshPage();
     if (page === "build" && log.task >= 0) loadLog(log.task, log.attempt);
   } else if (event.type === "activity") {

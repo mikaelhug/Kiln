@@ -596,7 +596,7 @@ fn split_quantity(quantity: &str) -> Option<(f64, &str)> {
     Some((number.parse::<f64>().ok()?, unit))
 }
 
-fn quantity_value(quantity: &str) -> f64 {
+pub fn quantity_value(quantity: &str) -> f64 {
     let Some((number, unit)) = split_quantity(quantity) else { return 0.0 };
     let scale = match unit {
         "" => 1.0,

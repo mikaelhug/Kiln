@@ -265,7 +265,48 @@ fn initial(name: &str) -> String {
     name.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default()
 }
 
+pub struct Live {
+    pub estimate: Option<i64>,
+    pub samples: Vec<crate::server::usage::Sample>,
+}
+
+pub fn cpu_text(cores: f64) -> String {
+    if cores < 0.095 { format!("{:.0}m CPU", cores * 1000.0) } else { format!("{cores:.1} CPU") }
+}
+
+pub fn memory_text(bytes: f64) -> String {
+    let gib = bytes / (1024.0 * 1024.0 * 1024.0);
+    if gib >= 1.0 { format!("{gib:.1} GiB") } else { format!("{:.0} MiB", bytes / (1024.0 * 1024.0)) }
+}
+
+pub fn live_meter(build: &Build, live: &Live) -> Markup {
+    let points: Vec<[f64; 2]> = live.samples.iter().map(|s| [s.cpu, s.memory]).collect();
+    let last = live.samples.last();
+    html! {
+        div class="live-meta" {
+            @if let Some(started) = build.started_at {
+                div class={"progress" @if live.estimate.is_none() { " unknown" }} data-since=(started) data-estimate=[live.estimate] {
+                    span class="fill" {}
+                }
+                span class="eta" data-eta {}
+            }
+            div class="usage" data-usage=(build.id) data-points=(serde_json::to_string(&points).unwrap_or_default()) {
+                span class="cpu" title="CPU in use" { i {} span class="v" { (last.map(|s| cpu_text(s.cpu)).unwrap_or_else(|| "– CPU".into())) } }
+                span class="mem" title="Memory in use" { i {} span class="v" { (last.map(|s| memory_text(s.memory)).unwrap_or_else(|| "– GiB".into())) } }
+                svg class="trend" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true" {
+                    polyline class="cpu" points="" {}
+                    polyline class="mem" points="" {}
+                }
+            }
+        }
+    }
+}
+
 pub fn build_row(build: &Build, repo: Option<&Repo>, show_repo: bool) -> Markup {
+    build_row_live(build, repo, show_repo, None)
+}
+
+pub fn build_row_live(build: &Build, repo: Option<&Repo>, show_repo: bool, meter: Option<&Live>) -> Markup {
     let href = repo.map(|r| build_path(r, build)).unwrap_or_default();
     let live = build.state.is_active() || build.state == BuildState::Queued;
     let failed = kind(build.state) == "bad";
@@ -274,6 +315,7 @@ pub fn build_row(build: &Build, repo: Option<&Repo>, show_repo: bool) -> Markup 
             (status(build.state, ""))
             div class="main" {
                 a class="title" href=(href) title=(commit_title(build)) { (commit_title(build)) }
+                @if let Some(meter) = meter.filter(|_| build.state.is_active()) { (live_meter(build, meter)) }
                 div class="sub" {
                     @if show_repo { @if let Some(repo) = repo { a href=(repo_path(repo)) { (repo.name) } } }
                     span { "#" (build.number) }
@@ -581,6 +623,7 @@ pub struct Stats {
 }
 
 pub struct DashboardData {
+    pub live: std::collections::HashMap<i64, Live>,
     pub repos: Vec<Repo>,
     pub active: Vec<Build>,
     pub queued: Vec<Build>,
@@ -670,7 +713,7 @@ pub fn dashboard_live(data: &DashboardData) -> Markup {
                 section class="card" {
                     div class="card-head" { h2 { "In progress" span class="count" { (data.active.len() + data.queued.len()) } } }
                     ul class="builds" {
-                        @for build in data.active.iter().chain(&data.queued) { (build_row(build, repo(build.repo_id), true)) }
+                        @for build in data.active.iter().chain(&data.queued) { (build_row_live(build, repo(build.repo_id), true, data.live.get(&build.id))) }
                     }
                 }
             }
@@ -1144,6 +1187,7 @@ fn triggers(on: &config::Triggers) -> String {
 }
 
 pub struct BuildData {
+    pub live: Option<Live>,
     pub ahead: Option<usize>,
     pub repo: Repo,
     pub build: Build,
@@ -1256,6 +1300,7 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                 }
             }
         }
+        @if let Some(live) = &data.live { div class="card live-card" { (live_meter(build, live)) } }
         (pipeline(data))
         (banner(build, data.ahead))
     }
@@ -1424,6 +1469,14 @@ pub fn sidebar(ctx: &Context<'_>, data: &BuildData, selected: Option<i64>) -> Ma
                         (task_status(task.state, "sm"))
                         span class="name" { (task_title(task)) }
                         span class="time" { (elapsed(task.started_at, task.finished_at)) }
+                        @if let Some(peak) = task.peak_memory {
+                            @let tight = task.memory_limit.is_some_and(|limit| peak * 100 >= limit * 85);
+                            span class={"peak" @if tight { " tight" }} title="Peak use while running" {
+                                (memory_text(peak as f64))
+                                @if let Some(limit) = task.memory_limit { " of " (memory_text(limit as f64)) }
+                                @if let Some(cpu) = task.peak_cpu_milli { " · " (cpu_text(cpu as f64 / 1000.0)) }
+                            }
+                        }
                     }
                 }
                 @if data.images.iter().any(|i| i.released.is_some()) || build.state == BuildState::Releasing {
