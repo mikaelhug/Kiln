@@ -375,7 +375,7 @@ a.stage:hover { border-color: var(--border-strong); }
 .log-find input { height: 28px; width: 200px; padding: 0 60px 0 27px; background: #0f0d0c; border: 1px solid #33302d; border-radius: 6px; color: var(--log-text); font: inherit; font-size: 12.5px; }
 .log-find input:focus { outline: none; border-color: #ea580c; }
 .log-find .hits { position: absolute; right: 8px; font-size: 11.5px; color: var(--log-muted); font-variant-numeric: tabular-nums; pointer-events: none; }
-.log-body { position: relative; font: 12.5px/1.65 var(--mono); padding: 4px 0 12px; max-height: calc(100vh - 230px); min-height: 240px; overflow: auto; }
+.log-body { position: relative; font: 12.5px/1.65 var(--mono); padding: 4px 0 12px; min-height: 240px; overflow: auto; }
 .log-body.nowrap .line .tx { white-space: pre; word-break: normal; }
 .log-body details { border-bottom: 1px solid #1a1817; }
 .log-body details:last-child { border-bottom: none; }
@@ -595,4 +595,14 @@ main > .banner.warn { align-items: center; }
 .task .peak.tight { color: var(--warn); }
 @media (prefers-reduced-motion: reduce) {
   .progress::after { display: none; }
+}
+@media (min-width: 1001px) {
+  body[data-page="build"] { height: 100dvh; display: flex; flex-direction: column; }
+  body[data-page="build"] > main { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; padding-bottom: 20px; }
+  body[data-page="build"] .build-layout { flex: 1; min-height: 0; align-items: stretch; }
+  body[data-page="build"] .side-col { position: static; max-height: none; min-height: 0; }
+  body[data-page="build"] .build-layout > .stack { min-height: 0; display: flex; flex-direction: column; }
+  body[data-page="build"] #log { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  body[data-page="build"] #log > .log { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  body[data-page="build"] .log-body { flex: 1; max-height: none; min-height: 240px; }
 }

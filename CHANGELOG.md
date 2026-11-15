@@ -4,6 +4,7 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+- On wide screens the build page fits the window and only the log scrolls.
 - Running builds show a progress bar with the time left, estimated from the repository's recent builds, and live CPU and memory with a small trend. Each task keeps its peak CPU and memory against its limit, flagged when it came close.
 - Image builds that pull a base image from a registry no longer fail with "mkdir /home/user/.docker: read-only file system".
 - `kiln builds` and `kiln logs [--follow]` read builds and their redacted logs inside the server pod, so people and agents can follow a build through `kubectl exec`.
