@@ -27,6 +27,7 @@ pub struct Context<'a> {
     pub viewer: &'a Viewer,
     pub github_web: &'a str,
     pub demo: bool,
+    pub registry_note: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -336,7 +337,16 @@ pub fn layout(title: &str, nav: &str, ctx: &Context<'_>, attrs: &[(&str, String)
                     }
                 }
             }
-            main { (content) }
+            main {
+                @if let Some(note) = ctx.registry_note.as_ref().filter(|_| nav != "settings") {
+                    div class="banner warn" {
+                        (icon(Icon::Key))
+                        div class="text" { strong { (note) } }
+                        a class="button small" href="/settings#registry" { "Add token" }
+                    }
+                }
+                (content)
+            }
             div class="toasts" aria-live="polite" {}
             (PreEscaped("</body>"))
         }
@@ -1684,6 +1694,7 @@ pub struct SettingsData {
     pub registry: String,
     pub registry_username: String,
     pub has_token: bool,
+    pub expires: Option<i64>,
     pub secrets_error: Option<String>,
     pub you: String,
 }
@@ -1718,10 +1729,11 @@ pub fn settings(ctx: &Context<'_>, data: &SettingsData) -> Markup {
                         None => div class="empty compact" { p { "Not connected" } },
                     }
                 }
-                section class="card" {
+                section class="card" id="registry" {
                     div class="card-head" {
                         h2 { (icon(Icon::Key)) "Registry" }
                         @if data.secrets_error.is_some() { span class="pill bad" { "Secrets failed" } }
+                        @else if let (true, Some(note)) = (data.has_token, &ctx.registry_note) { span class="pill warn" { (note) } }
                         @else if data.has_token { span class="pill ok" { "Token saved" } }
                         @else { span class="pill warn" { "No token" } }
                     }
@@ -1730,18 +1742,36 @@ pub fn settings(ctx: &Context<'_>, data: &SettingsData) -> Markup {
                         @if let Some(error) = &data.secrets_error {
                             div class="banner bad" { (icon(Icon::Alert)) div class="text" { strong { "Build pods cannot get the token" } span class="hint" { (error) } } }
                         }
-                        dl class="facts" { dt { "Publishes to" } dd { code { (data.registry) } } }
-                        label class="field" { span { "Username" } input class="input" name="username" value=(data.registry_username) autocomplete="off" required; }
-                        label class="field" {
-                            span { "Token" }
-                            input class="input" type="password" name="token" autocomplete="new-password" required placeholder=(if data.has_token { "Saved; enter a new one to replace it" } else { "write:packages" });
-                        }
-                        div class="actions" {
-                            button class="button primary" type="submit" disabled[ctx.demo] { "Save token" }
-                            @if data.registry.starts_with("ghcr.io/") {
-                                a class="button" href={(ctx.github_web) "/settings/tokens/new?scopes=write:packages&description=Kiln"} target="_blank" rel="noopener" { (PreEscaped(GITHUB)) "Create token" }
+                        dl class="facts" {
+                            dt { "Publishes to" } dd { code { (data.registry) } }
+                            @if data.has_token {
+                                dt { "Token of" } dd { (data.registry_username) }
+                                dt { "Expires" } dd { @if let Some(at) = data.expires { (time(at)) } @else { "Never" } }
                             }
                         }
+                        @if data.registry.starts_with("ghcr.io/") {
+                            ol class="token-steps" {
+                                li {
+                                    span class="num" { "1" }
+                                    div class="what" { strong { "Create a classic token" } span class="hint" { "Scope " code { "write:packages" } } }
+                                    a class="button small" href={(ctx.github_web) "/settings/tokens/new?scopes=write:packages&description=Kiln"} target="_blank" rel="noopener" { (PreEscaped(GITHUB)) "Create token" }
+                                }
+                                li {
+                                    span class="num" { "2" }
+                                    label class="what" {
+                                        strong { "Paste it" }
+                                        input class="input" type="password" name="token" autocomplete="new-password" required spellcheck="false" placeholder=(if data.has_token { "Replaces the saved token" } else { "ghp_…" });
+                                    }
+                                }
+                            }
+                        } @else {
+                            label class="field" { span { "Username" } input class="input" name="username" value=(data.registry_username) autocomplete="off" required; }
+                            label class="field" {
+                                span { "Token" }
+                                input class="input" type="password" name="token" autocomplete="new-password" required placeholder=(if data.has_token { "Replaces the saved token" } else { "" });
+                            }
+                        }
+                        div class="actions" { button class="button primary" type="submit" disabled[ctx.demo] { "Save token" } }
                     }
                 }
                 section class="card wide" {

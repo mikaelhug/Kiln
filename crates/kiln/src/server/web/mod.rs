@@ -236,7 +236,25 @@ fn same_origin<P: Platform>(web: &Web<P>, headers: &HeaderMap) -> WebResult<()> 
 }
 
 fn context<'a, P: Platform>(web: &'a Web<P>, viewer: &'a Viewer) -> Context<'a> {
-    Context { viewer, github_web: &web.engine.settings.github_web, demo: web.demo }
+    Context {
+        viewer,
+        github_web: &web.engine.settings.github_web,
+        demo: web.demo,
+        registry_note: registry_note(&web.engine.settings),
+    }
+}
+
+fn registry_note(settings: &crate::server::Settings) -> Option<String> {
+    if settings.registry_password.is_none() {
+        return Some("Releases wait for a registry token".into());
+    }
+    let days = (settings.registry_expires? - kiln_github::unix_now() as i64) / 86_400;
+    match days {
+        ..0 => Some("The registry token has expired".into()),
+        0 => Some("The registry token expires today".into()),
+        1..=13 => Some(format!("The registry token expires in {days} days")),
+        _ => None,
+    }
 }
 
 fn viewer(user: &User) -> Viewer {
@@ -732,6 +750,7 @@ async fn settings_page<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) 
         registry: web.engine.settings.registry.clone(),
         registry_username: web.engine.settings.registry_username.clone(),
         has_token: web.engine.settings.registry_password.is_some(),
+        expires: web.engine.settings.registry_expires,
         secrets_error: web.engine.platform.registry_secrets_error(),
         you: user.login.clone(),
     };
@@ -740,7 +759,7 @@ async fn settings_page<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) 
 
 #[derive(Deserialize)]
 struct RegistryForm {
-    username: String,
+    username: Option<String>,
     token: String,
 }
 
@@ -754,12 +773,32 @@ async fn save_registry<P: Platform>(
     if web.demo {
         return Ok(flash("/settings", "Not available in the demo"));
     }
-    let (username, token) = (form.username.trim(), form.token.trim());
-    if username.is_empty() || token.is_empty() {
-        return Ok(flash("/settings", "Enter a username and a token"));
-    }
-    web.engine.store.set_registry(username, token)?;
-    web.engine.audit(&user.login, "registry_token_saved", None, None, Some(username.to_owned()));
+    let token = form.token.trim();
+    let settings = &web.engine.settings;
+    let (username, expires) = if settings.registry.starts_with("ghcr.io/") {
+        let owner = match kiln_github::token_owner(&settings.github_api, token).await {
+            Ok(owner) => owner,
+            Err(kiln_github::Error::Status { status, .. }) if status == StatusCode::UNAUTHORIZED => {
+                return Ok(flash("/settings", "GitHub did not accept this token"));
+            }
+            Err(error) => {
+                tracing::warn!(%error, "checking the registry token failed");
+                return Ok(flash("/settings", "GitHub did not answer; try again"));
+            }
+        };
+        if !owner.scopes.iter().any(|s| s == "write:packages") {
+            return Ok(flash("/settings", "Use a classic token with write:packages"));
+        }
+        (owner.login, owner.expires.as_deref().and_then(github_time))
+    } else {
+        let username = form.username.as_deref().unwrap_or_default().trim().to_owned();
+        if username.is_empty() || token.is_empty() {
+            return Ok(flash("/settings", "Enter a username and a token"));
+        }
+        (username, None)
+    };
+    web.engine.store.set_registry(&username, token, expires)?;
+    web.engine.audit(&user.login, "registry_token_saved", None, None, Some(username.clone()));
     restart_soon();
     Ok(flash("/settings", "Saved; Kiln restarts to use it"))
 }
@@ -777,6 +816,22 @@ async fn disconnect<P: Platform>(
     web.engine.audit(&user.login, "github_disconnected", None, None, None);
     restart_soon();
     Ok(flash("/", "Disconnected; Kiln restarts"))
+}
+
+fn github_time(text: &str) -> Option<i64> {
+    let mut parts = text.split(|c: char| !c.is_ascii_digit()).filter(|p| !p.is_empty());
+    let mut next = || parts.next()?.parse::<i32>().ok();
+    let (year, month, day) = (next()?, next()?, next()?);
+    let (hour, minute, second) = (next()?, next()?, next()?);
+    let date = time::Date::from_calendar_date(
+        year,
+        time::Month::try_from(u8::try_from(month).ok()?).ok()?,
+        u8::try_from(day).ok()?,
+    )
+    .ok()?;
+    let time =
+        time::Time::from_hms(u8::try_from(hour).ok()?, u8::try_from(minute).ok()?, u8::try_from(second).ok()?).ok()?;
+    Some(date.with_time(time).assume_utc().unix_timestamp())
 }
 
 fn restart_soon() {

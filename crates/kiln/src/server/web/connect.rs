@@ -195,6 +195,7 @@ async fn callback(State(connect): State<Arc<Connect>>, jar: CookieJar, Query(que
         registry_username: None,
         registry_token: None,
         connected_at: unix_now(),
+        registry_expires: None,
     };
     match connect.store.connect_github(&app) {
         Ok(true) => *connect.pending.lock().expect("pending setup") = None,

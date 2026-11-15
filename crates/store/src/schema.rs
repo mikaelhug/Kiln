@@ -196,6 +196,9 @@ CREATE TABLE people (
     added_at INTEGER NOT NULL
 );
 ",
+    r"
+ALTER TABLE github ADD COLUMN registry_expires INTEGER;
+",
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

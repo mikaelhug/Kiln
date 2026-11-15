@@ -119,6 +119,7 @@ fn app(owner_is_user: bool) -> GitHubApp {
         registry_username: None,
         registry_token: None,
         connected_at: 0,
+        registry_expires: None,
     }
 }
 

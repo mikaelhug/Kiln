@@ -119,3 +119,34 @@ pub async fn find_user(api: &str, login: &str) -> Result<GitHubUser> {
     }
     Ok(response.json().await?)
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenOwner {
+    pub login: String,
+    pub scopes: Vec<String>,
+    pub expires: Option<String>,
+}
+
+pub async fn token_owner(api: &str, token: &str) -> Result<TokenOwner> {
+    let response = reqwest::Client::new()
+        .get(format!("{}/user", api.trim_end_matches('/')))
+        .header(ACCEPT, "application/vnd.github+json")
+        .header(USER_AGENT, AGENT)
+        .header(AUTHORIZATION, format!("token {token}"))
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(Error::Status { status, message: response.text().await.unwrap_or_default() });
+    }
+    let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
+    let scopes = header("x-oauth-scopes")
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let expires = header("github-authentication-token-expiration");
+    let user: GitHubUser = response.json().await?;
+    Ok(TokenOwner { login: user.login, scopes, expires })
+}

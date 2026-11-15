@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 
 pub use app::{AppKey, CreatedApp, ManifestOwner, convert_manifest};
 pub use checks::{Annotation, CheckConclusion, CheckOutput, CheckRun, CheckStatus};
-pub use oauth::{AuthorizeRequest, GitHubUser, OAuthApp, find_user, random_token};
+pub use oauth::{AuthorizeRequest, GitHubUser, OAuthApp, TokenOwner, find_user, random_token, token_owner};
 pub use repos::{Account, Compare, Head, Installation, PullRequest, Repository, TagRef, Token, download_tarball};
 
 const API_VERSION: &str = "2022-11-28";

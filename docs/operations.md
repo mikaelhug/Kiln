@@ -59,9 +59,9 @@ Enter it, optionally with an organization, and Kiln sends you to GitHub with its
 
 ## 3. Add a registry token
 
-Image builds need a token that can publish to your registry. For GitHub Container Registry, create a classic token with only `write:packages` and a one-year expiry. Open **Settings › Registry**, enter the token and its owner's login, and save. Kiln restarts to use it, and creates the push and pull secrets for build pods itself.
+Image builds need a token that can publish to your registry. GitHub's container registry does not accept GitHub App tokens, so Kiln needs one classic token, which covers every repository. Open **Settings › Registry**, click **Create token** (GitHub opens with `write:packages` selected), choose an expiry, and paste the token. Kiln checks it with GitHub, takes the username and expiry from it, restarts to use it, and creates the push and pull secrets for build pods itself. Every page shows a reminder when no token is saved and two weeks before it expires.
 
-A release tag deploys straight to production, so this token is the most sensitive secret Kiln holds. Only the server and the `push` step of a build ever see it. Until a token is saved, pull requests are tested but default-branch builds stop with a note asking for one.
+A release tag deploys straight to production, so this token is the most sensitive secret Kiln holds. Only the server and the `push` step of a build ever see it. Until a token is saved, pull requests are tested and default-branch builds wait.
 
 ## 4. Onboard a repository
 
@@ -130,7 +130,7 @@ Only `KILN_PUBLIC_URL` is required. Lists are comma-separated.
 | A node was drained during a build | Kiln retries the build on another node, up to `KILN_MAX_ATTEMPTS`. |
 | Builds fail to start with "exceeded quota" | Raise the ResourceQuota in `build-policy.yaml`, or lower `KILN_SLOTS` or job resources. |
 | GitHub is down | Builds wait. Kiln catches up from polling, and check runs are retried from an outbox. |
-| The registry token expires | Save a new one in **Settings › Registry**. |
+| The registry token expires | Kiln warns two weeks ahead; save a new one in **Settings › Registry**. |
 | The GitHub App was deleted or its key revoked | **Settings › GitHub › Disconnect**, then connect again. People and history stay. If nobody can sign in, delete Kiln's data volume instead. |
 | The database is lost | Kiln shows **Connect GitHub** again; connect a new app and delete the old one on GitHub. Version numbers continue from the registry; only history is lost. |
 | A release failed with "semver tags are immutable" | Someone or something already published that version with a different image. Release a new version. |

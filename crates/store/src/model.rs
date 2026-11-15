@@ -364,6 +364,7 @@ pub struct GitHubApp {
     pub registry_username: Option<String>,
     pub registry_token: Option<String>,
     pub connected_at: i64,
+    pub registry_expires: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

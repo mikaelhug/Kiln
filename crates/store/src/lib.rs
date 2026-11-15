@@ -731,7 +731,7 @@ impl Store {
             .conn()
             .query_row(
                 "SELECT app_id, slug, name, html_url, client_id, client_secret, webhook_secret, private_key, owner_login,
-                        owner_id, owner_is_user, claim_token, registry_username, registry_token, connected_at
+                        owner_id, owner_is_user, claim_token, registry_username, registry_token, connected_at, registry_expires
                  FROM github WHERE id = 1",
                 [],
                 |row| {
@@ -751,6 +751,7 @@ impl Store {
                         registry_username: row.get(12)?,
                         registry_token: row.get(13)?,
                         connected_at: row.get(14)?,
+                        registry_expires: row.get(15)?,
                     })
                 },
             )
@@ -797,10 +798,10 @@ impl Store {
         Ok(())
     }
 
-    pub fn set_registry(&self, username: &str, token: &str) -> Result<()> {
+    pub fn set_registry(&self, username: &str, token: &str, expires: Option<i64>) -> Result<()> {
         self.conn().execute(
-            "UPDATE github SET registry_username = ?1, registry_token = ?2 WHERE id = 1",
-            params![username, token],
+            "UPDATE github SET registry_username = ?1, registry_token = ?2, registry_expires = ?3 WHERE id = 1",
+            params![username, token, expires],
         )?;
         Ok(())
     }

@@ -28,6 +28,7 @@ pub struct Settings {
     pub registry_url: String,
     pub registry_username: String,
     pub registry_password: Option<String>,
+    pub registry_expires: Option<i64>,
     pub slots: usize,
     pub poll_secs: u64,
     pub build_timeout_secs: u64,
@@ -174,6 +175,7 @@ impl Settings {
                 .clone()
                 .unwrap_or_else(|| if app.owner_is_user { app.owner_login.clone() } else { String::new() }),
             registry_password,
+            registry_expires: app.registry_expires,
             slots: number("KILN_SLOTS", 2)?.max(1),
             poll_secs: number("KILN_POLL_SECONDS", 60)?.max(15),
             build_timeout_secs: number("KILN_BUILD_TIMEOUT_SECONDS", 1800)?.clamp(60, 7200),
@@ -210,6 +212,7 @@ impl Settings {
             registry_url: runner.registry_url.clone(),
             registry_username: "kiln-demo".into(),
             registry_password: Some("demo".into()),
+            registry_expires: None,
             slots: 2,
             poll_secs: 15,
             build_timeout_secs: 1800,
