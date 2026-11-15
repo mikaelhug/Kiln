@@ -1506,10 +1506,16 @@ impl<P: Platform> Engine<P> {
 
     async fn usage_loop(self: Arc<Self>) {
         let mut tick = tokio::time::interval(Duration::from_secs(15));
+        let mut failing = false;
         loop {
             tick.tick().await;
-            if let Err(error) = self.sample_usage().await {
-                tracing::debug!(error = format!("{error:#}"), "reading build usage failed");
+            match self.sample_usage().await {
+                Ok(()) => failing = false,
+                Err(error) if !failing => {
+                    failing = true;
+                    tracing::warn!(error = format!("{error:#}"), "reading build usage failed");
+                }
+                Err(_) => {}
             }
         }
     }

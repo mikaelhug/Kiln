@@ -144,8 +144,7 @@ function onUsage(event) {
     set(".mem .unit", event.limit ? ` of ${memoryText(event.limit)}` : "");
     set(".cpu .pv", coresText(Math.max(...points.map((p) => p[0]))));
     set(".mem .pv", memoryText(Math.max(...points.map((p) => p[1]))));
-    set(".cpu .ref-text", event.request ? `request ${coresText(event.request)}` : "");
-    set(".mem .ref-text", event.limit ? `limit ${memoryText(event.limit)}` : "");
+    set(".cpu .ref-text", event.request ? ` · request ${coresText(event.request)}` : "");
     card.querySelector(".metrics").hidden = false;
     drawResources(card);
   }
@@ -212,6 +211,7 @@ function syncAttributes(el, next) {
   for (const { name } of [...el.attributes]) {
     if (next.hasAttribute(name)) continue;
     if (name === "open" && el.tagName === "DETAILS") continue;
+    if (name === "style") continue;
     el.removeAttribute(name);
   }
   for (const { name, value } of [...next.attributes]) {

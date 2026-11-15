@@ -382,57 +382,55 @@ pub fn resources_card(build: &Build, live: &Live) -> Markup {
         live.samples.iter().map(pick).fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))))
     };
     let dash = || "–".to_owned();
+    let chart = || {
+        html! {
+            svg class="area" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true" {
+                line class="ref" x1="0" x2="100" y1="0" y2="0" {}
+                path class="under" d="" {}
+                path class="line" d="" {}
+            }
+        }
+    };
     html! {
         section class="card resources" data-usage=(build.id) data-points=(serde_json::to_string(&points).unwrap_or_default()) {
-            div class="resources-head" {
+            div class="card-head" {
                 h2 { "Resources" }
-                @if let (Some(started), Some(finish)) = (build.started_at, live.finish) {
-                    span class="eta" data-eta {}
-                    div class="progress" data-since=(started) data-finish=(finish) { span class="fill" {} }
-                }
+                @if live.finish.is_some() { span class="eta" data-eta {} }
+            }
+            @if let (Some(started), Some(finish)) = (build.started_at, live.finish) {
+                div class="progress" data-since=(started) data-finish=(finish) { span class="fill" {} }
             }
             div class="metrics" hidden[last.is_none()] {
                 div class="metric cpu" {
                     div class="metric-head" {
                         span class="label" { "CPU" }
-                        span class="now" { span class="v" { (last.map(|s| cores_text(s.cpu)).unwrap_or_else(dash)) } span class="unit" { " cores" } }
                         span class="peak" { "peak " span class="pv" { (peak(|s| s.cpu).map(cores_text).unwrap_or_else(dash)) } }
+                    }
+                    div class="now" {
+                        span class="v" { (last.map(|s| cores_text(s.cpu)).unwrap_or_else(dash)) }
+                        span class="unit" { " cores" }
+                        span class="ref-text" { (last.and_then(|s| s.request).map(|r| format!(" · request {}", cores_text(r))).unwrap_or_default()) }
                     }
                     div class="meter" role="meter" aria-label="CPU in use" aria-valuemin="0" {
                         span class="fill" {} span class="mark peak-mark" {} span class="mark ref-mark" {}
                     }
-                    svg class="area" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true" {
-                        line class="ref" x1="0" x2="100" y1="0" y2="0" {}
-                        path class="under" d="" {}
-                        path class="line" d="" {}
-                    }
-                    div class="metric-foot" {
-                        span { "15 s averages" }
-                        span class="ref-text" { (last.and_then(|s| s.request).map(|r| format!("request {}", cores_text(r))).unwrap_or_default()) }
-                    }
+                    (chart())
                 }
                 div class="metric mem" {
                     div class="metric-head" {
                         span class="label" { "Memory" }
-                        span class="now" {
-                            span class="v" { (last.map(|s| memory_text(s.memory)).unwrap_or_else(dash)) }
-                            span class="unit" { (last.and_then(|s| s.limit).map(|l| format!(" of {}", memory_text(l))).unwrap_or_default()) }
-                        }
                         span class="peak" { "peak " span class="pv" { (peak(|s| s.memory).map(memory_text).unwrap_or_else(dash)) } }
+                    }
+                    div class="now" {
+                        span class="v" { (last.map(|s| memory_text(s.memory)).unwrap_or_else(dash)) }
+                        span class="unit" { (last.and_then(|s| s.limit).map(|l| format!(" of {}", memory_text(l))).unwrap_or_default()) }
                     }
                     div class="meter" role="meter" aria-label="Memory in use" aria-valuemin="0" {
                         span class="fill" {} span class="mark peak-mark" {}
                     }
-                    svg class="area" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true" {
-                        line class="ref" x1="0" x2="100" y1="0" y2="0" {}
-                        path class="under" d="" {}
-                        path class="line" d="" {}
-                    }
-                    div class="metric-foot" {
-                        span { "15 s averages" }
-                        span class="ref-text" { (last.and_then(|s| s.limit).map(|l| format!("limit {}", memory_text(l))).unwrap_or_default()) }
-                    }
+                    (chart())
                 }
+                div class="metrics-foot" { "15 s averages" }
             }
         }
     }
@@ -1433,7 +1431,6 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                 }
             }
         }
-        @if let Some(live) = &data.live { (resources_card(build, live)) }
         (pipeline(data))
         (banner(build, data.ahead))
     }
@@ -1633,6 +1630,7 @@ pub fn sidebar(data: &BuildData, selected: Option<i64>) -> Markup {
                 }
             }
         }
+        @if let Some(live) = &data.live { (resources_card(build, live)) }
     }
 }
 

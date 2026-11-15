@@ -243,9 +243,6 @@ a.tile:hover { border-color: var(--border-strong); }
 .tile .value.bad { color: var(--bad); }
 .tile .foot:not(:last-child) { margin-bottom: 8px; }
 .tile .foot { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meter { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; margin-top: auto; display: flex; gap: 2px; }
-.meter span { flex: 1; background: var(--surface-3); }
-.meter span.on { background: var(--run); }
 .spark { display: flex; align-items: flex-end; gap: 2px; height: 22px; margin-top: auto; padding-top: 8px; box-sizing: content-box; }
 .spark span { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
 .spark i { display: block; }
@@ -617,43 +614,35 @@ main > .banner.warn { align-items: center; }
 .tile .value.changed { animation: kiln-fade 0.3s ease-out; }
 @keyframes kiln-flash { from { opacity: 1; } to { opacity: 0; } }
 @keyframes kiln-fade { from { opacity: 0.4; } to { opacity: 1; } }
-.resources { margin-bottom: 16px; padding: 12px 16px 14px; }
-.resources-head { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 12px; }
-.resources-head h2 { font-size: 13px; font-weight: 600; margin: 0; }
-.resources-head h2 { flex: 1; }
-.resources-head .eta { order: 2; }
-.resources-head .progress { order: 3; flex: 0 1 200px; }
-.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.metric { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px 8px; display: grid; gap: 8px; --tone: var(--run); --tone-soft: var(--run-soft); }
-.metric.mem { --tone: var(--accent); --tone-soft: var(--accent-soft); }
-.metric.mem.warn { --tone: var(--warn); }
-.metric.mem.bad { --tone: var(--bad); --tone-soft: var(--bad-soft); }
-.metric-head { display: flex; align-items: baseline; gap: 8px; }
-.metric-head .label { font-size: 12px; color: var(--muted); min-width: 52px; }
-.metric-head .now { font-variant-numeric: tabular-nums; }
-.metric-head .now .v { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
-.metric-head .now .unit { font-size: 12.5px; color: var(--muted); }
-.metric-head .peak { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.meter { position: relative; height: 6px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); }
-.meter .fill { position: absolute; inset: 0; border-radius: inherit; background: var(--tone); transform-origin: left center; transform: scaleX(0); transition: transform 0.3s ease-out; }
-.meter .mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text-2); opacity: 0.55; }
-.meter .ref-mark { background: none; border-left: 2px dashed var(--muted); width: 0; opacity: 0.8; }
-.area { width: 100%; height: 56px; display: block; overflow: visible; }
-.area.hidden, .area .hidden { display: none; }
-.area .under { fill: var(--tone); opacity: 0.14; }
-.area .line { fill: none; stroke: var(--tone); stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.area .ref { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; vector-effect: non-scaling-stroke; }
-.metric.mem .area .ref { stroke: var(--bad); opacity: 0.5; }
-.metric-foot { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
-@media (max-width: 700px) {
-  .metrics { grid-template-columns: 1fr; }
-}
 body[data-page="build"] .status.run svg { display: none; }
 body[data-page="build"] .status.run::before { content: ""; width: 40%; height: 40%; border-radius: 50%; background: var(--run); }
 body[data-page="build"] .pipeline .status.run svg { display: block; }
 body[data-page="build"] .pipeline .status.run::before { content: none; }
 .log-head .exit { margin-left: 6px; color: #f87171; }
-.metrics[hidden] { display: none; }
 @media (min-width: 1001px) {
   .log-head .name span, .log-head .meta .t { display: none; }
 }
+.resources .card-head { gap: 8px; }
+.resources .card-head h2 { flex: 1; }
+.resources > .progress { margin: 0 16px 12px; max-width: none; }
+.metrics { display: grid; gap: 14px; padding: 0 16px 12px; }
+.metrics[hidden] { display: none; }
+.metric { display: grid; gap: 6px; --tone: var(--run); }
+.metric.mem { --tone: var(--accent); }
+.metric.mem.warn { --tone: var(--warn); }
+.metric.mem.bad { --tone: var(--bad); }
+.metric-head { display: flex; align-items: baseline; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.metric-head .peak { font-variant-numeric: tabular-nums; }
+.metric .now { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12.5px; }
+.metric .now .v { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
+.meter { position: relative; height: 6px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); }
+.meter .fill { position: absolute; inset: 0; border-radius: inherit; background: var(--tone); transform-origin: left center; transform: scaleX(0); transition: transform 0.3s ease-out; }
+.meter .mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text-2); opacity: 0.55; }
+.meter .ref-mark { background: none; border-left: 2px dashed var(--muted); width: 0; opacity: 0.8; }
+.area { width: 100%; height: 36px; display: block; overflow: visible; }
+.area.hidden, .area .hidden { display: none; }
+.area .under { fill: var(--tone); opacity: 0.14; }
+.area .line { fill: none; stroke: var(--tone); stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.area .ref { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; vector-effect: non-scaling-stroke; }
+.metric.mem .area .ref { stroke: var(--bad); opacity: 0.5; }
+.metrics-foot { font-size: 11.5px; color: var(--muted); }

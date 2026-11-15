@@ -275,11 +275,7 @@ impl Platform for Live {
     }
 
     async fn pod_usage(&self) -> Result<Vec<ContainerUsage>> {
-        let list = self
-            .pod_metrics
-            .list(&ListParams::default().labels(&format!("{MANAGED_BY}=kiln")))
-            .await
-            .context("reading build pod metrics")?;
+        let list = self.pod_metrics.list(&ListParams::default()).await.context("reading build pod metrics")?;
         let mut out = Vec::new();
         for pod in &list.items {
             let at = pod.data["timestamp"]
