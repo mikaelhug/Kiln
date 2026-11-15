@@ -146,8 +146,7 @@ function onUsage(event) {
     set(".mem .pv", memoryText(Math.max(...points.map((p) => p[1]))));
     set(".cpu .ref-text", event.request ? `request ${coresText(event.request)}` : "");
     set(".mem .ref-text", event.limit ? `limit ${memoryText(event.limit)}` : "");
-    const names = (event.tasks || []).map((ordinal) => document.querySelector(`#t-${ordinal} .name`)?.textContent).filter(Boolean);
-    set(".what", names.join(", "));
+    card.querySelector(".metrics").hidden = false;
     drawResources(card);
   }
 }

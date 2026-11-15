@@ -1532,10 +1532,8 @@ impl<P: Platform> Engine<P> {
             let mut watched: Vec<(&str, f64, i64)> = Vec::new();
             let mut sources: Vec<&str> = Vec::new();
             let mut request = 0.0;
-            let mut running = Vec::new();
             for task in tasks.iter().filter(|t| t.state == TaskState::Running) {
                 let source = if task.kind == TaskKind::Image { "buildkitd" } else { task.container.as_str() };
-                running.push(task.ordinal);
                 if sources.contains(&source) {
                     continue;
                 }
@@ -1553,7 +1551,7 @@ impl<P: Platform> Engine<P> {
             } else {
                 (watched.iter().map(|w| w.1).sum(), Some(watched.iter().map(|w| w.2 as f64).sum()))
             };
-            let sample = Sample { at, cpu, memory, limit, request, tasks: running.clone() };
+            let sample = Sample { at, cpu, memory, limit, request };
             if !self.usage.record(build.id, sample) {
                 continue;
             }
@@ -1576,7 +1574,6 @@ impl<P: Platform> Engine<P> {
                 memory,
                 limit,
                 request,
-                tasks: running,
             });
         }
         Ok(())

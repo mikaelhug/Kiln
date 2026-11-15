@@ -12,7 +12,6 @@ pub struct Sample {
     pub memory: f64,
     pub limit: Option<f64>,
     pub request: Option<f64>,
-    pub tasks: Vec<i64>,
 }
 
 #[derive(Default)]

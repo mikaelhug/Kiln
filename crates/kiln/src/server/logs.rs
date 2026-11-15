@@ -17,7 +17,7 @@ pub enum Event {
     LogReset { build: i64, attempt: i64, task: i64 },
     Activity,
     Resync,
-    Usage { build: i64, repo: i64, cpu: f64, memory: f64, limit: Option<f64>, request: Option<f64>, tasks: Vec<i64> },
+    Usage { build: i64, repo: i64, cpu: f64, memory: f64, limit: Option<f64>, request: Option<f64> },
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]

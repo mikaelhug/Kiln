@@ -370,28 +370,24 @@ pub fn cores_text(cores: f64) -> String {
     if cores < 0.1 { format!("{cores:.2}") } else { format!("{cores:.1}") }
 }
 
-pub fn resources_card(build: &Build, live: &Live, tasks: &[Task]) -> Markup {
+pub fn resources_card(build: &Build, live: &Live) -> Markup {
     let points: Vec<[f64; 4]> =
         live.samples.iter().map(|s| [s.cpu, s.memory, s.limit.unwrap_or(0.0), s.request.unwrap_or(0.0)]).collect();
     let last = live.samples.last();
     let peak = |pick: fn(&crate::server::usage::Sample) -> f64| {
         live.samples.iter().map(pick).fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))))
     };
-    let what: Vec<String> = last
-        .map(|s| s.tasks.iter().filter_map(|o| tasks.iter().find(|t| t.ordinal == *o)).map(task_title).collect())
-        .unwrap_or_default();
     let dash = || "–".to_owned();
     html! {
         section class="card resources" data-usage=(build.id) data-points=(serde_json::to_string(&points).unwrap_or_default()) {
             div class="resources-head" {
                 h2 { "Resources" }
-                span class="what" { (what.join(", ")) }
                 @if let (Some(started), Some(finish)) = (build.started_at, live.finish) {
                     span class="eta" data-eta {}
                     div class="progress" data-since=(started) data-finish=(finish) { span class="fill" {} }
                 }
             }
-            div class="metrics" {
+            div class="metrics" hidden[last.is_none()] {
                 div class="metric cpu" {
                     div class="metric-head" {
                         span class="label" { "CPU" }
@@ -1359,7 +1355,7 @@ pub fn build(ctx: &Context<'_>, data: &BuildData) -> Markup {
             div id="live" { (build_head(ctx, data)) }
             div class="build-layout" {
                 div class="side-col" {
-                    div id="tasks" class="side-stack" { (sidebar(ctx, data, selected)) }
+                    div id="tasks" class="side-stack" { (sidebar(data, selected)) }
                     div id="images" class="side-stack" { @if data.images.iter().any(|i| i.digest.is_some()) { (images_card(&data.images)) } }
                 }
                 div class="stack" {
@@ -1430,7 +1426,18 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                             (retry_pill(build, data.rerun_of.as_ref()))
                             @if let Some(actor) = &build.actor { span { (icon(Icon::User)) (actor) } }
                             span { (icon(Icon::Clock)) (time(build.created_at)) }
-                            @if build.started_at.is_some() { span { (icon(Icon::Timer)) (elapsed(build.started_at, build.finished_at)) } }
+                            @if build.started_at.is_some() { span title="Duration" { (icon(Icon::Timer)) (elapsed(build.started_at, build.finished_at)) } }
+                            @if let Some(started) = build.started_at.filter(|s| s - build.created_at >= 5) {
+                                span title="Waited for a build slot" { (icon(Icon::Clock)) "waited " (duration(started - build.created_at)) }
+                            }
+                            @if let Some(original) = &data.rerun_of { a href=(build_path(repo, original)) { (icon(Icon::Rerun)) "rerun of #" (original.number) } }
+                            @if build.attempt > 1 {
+                                span class="attempts" title="Attempts" {
+                                    @for attempt in 1..=build.attempt {
+                                        @if attempt == data.attempt { span class="current" aria-current="true" { (attempt) } } @else { a href={(build_path(repo, build)) "?attempt=" (attempt)} { (attempt) } }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1449,7 +1456,7 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                 }
             }
         }
-        @if let Some(live) = &data.live { (resources_card(build, live, &data.tasks)) }
+        @if let Some(live) = &data.live { (resources_card(build, live)) }
         (pipeline(data))
         (banner(build, data.ahead))
     }
@@ -1602,8 +1609,8 @@ fn banner(build: &Build, ahead: Option<usize>) -> Markup {
     }
 }
 
-pub fn sidebar(ctx: &Context<'_>, data: &BuildData, selected: Option<i64>) -> Markup {
-    let BuildData { repo, build, .. } = data;
+pub fn sidebar(data: &BuildData, selected: Option<i64>) -> Markup {
+    let build = &data.build;
     let begin = build.started_at;
     let end = build.finished_at.unwrap_or_else(|| kiln_github::unix_now() as i64);
     let lane = |task: &Task| -> Option<(f64, f64)> {
@@ -1647,43 +1654,6 @@ pub fn sidebar(ctx: &Context<'_>, data: &BuildData, selected: Option<i64>) -> Ma
                         }
                     }
                 }
-                @if data.images.iter().any(|i| i.released.is_some()) || build.state == BuildState::Releasing {
-                    div class="group-label" { "Release" }
-                    @for image in &data.images {
-                        div class="task static" {
-                            (task_status(if image.released.is_some() { TaskState::Passed } else { TaskState::Running }, "sm"))
-                            span class="name" { (image.name) }
-                            span class="time mono" { @if let Some(tag) = &image.released { (tag) } }
-                        }
-                    }
-                }
-            }
-        }
-        section class="card" {
-            div class="card-head" { h2 { "Details" } }
-            dl class="facts" {
-                dt { "Status" } dd { span class={"pill " (kind(build.state))} { (state_label(build.state)) } }
-                dt { "Repository" } dd { a href=(repo_path(repo)) { (repo.full_name()) } }
-                dt { "Trigger" } dd {
-                    (match build.trigger { Trigger::Push => "Push", Trigger::Tag => "Tag", Trigger::PullRequest => "Pull request", Trigger::Manual => "Manual" })
-                    a href=(trigger_url(ctx, repo, build)) target="_blank" rel="noopener" { @if build.trigger == Trigger::PullRequest { "#" (build.pr_number.unwrap_or_default()) } @else { (build.ref_name) } }
-                }
-                dt { "Commit" } dd { a class="mono" href={(ctx.github_web) "/" (repo.full_name()) "/commit/" (build.sha)} target="_blank" rel="noopener" { (build.short_sha()) } }
-                @if let Some(version) = &build.version { dt { "Version" } dd { code { (version) } } }
-                @if let Some(actor) = &build.actor { dt { "Started by" } dd { (actor) } }
-                dt { "Created" } dd { (time(build.created_at)) }
-                @if let Some(started) = build.started_at { dt { "Waited" } dd { (duration(started - build.created_at)) } }
-                @if build.started_at.is_some() { dt { "Duration" } dd { (elapsed(build.started_at, build.finished_at)) } }
-                @if build.attempt > 1 {
-                    dt { "Attempt" } dd {
-                        div class="attempts" {
-                            @for attempt in 1..=build.attempt {
-                                @if attempt == data.attempt { span class="current" aria-current="true" { (attempt) } } @else { a href={(build_path(repo, build)) "?attempt=" (attempt)} { (attempt) } }
-                            }
-                        }
-                    }
-                }
-                @if let Some(original) = &data.rerun_of { dt { "Rerun of" } dd { a href=(build_path(repo, original)) { "#" (original.number) } } }
             }
         }
     }
@@ -1737,10 +1707,10 @@ pub fn log_view(
     html! {
         div class="log" {
             div class="log-head" data-bytes=(bytes) data-open=(!text.is_empty() && !text.ends_with('\n')) data-first-line=(skipped.unwrap_or(0)) data-state=(task.state.as_str()) {
-                div class="name" { (task_status(task.state, "sm")) span { (task_title(task)) } }
+                div class="name" { span { (task_title(task)) } }
                 span class="meta" {
-                    (elapsed(task.started_at, task.finished_at))
-                    @if let Some(code) = task.exit_code.filter(|c| *c != 0) { " · exit " (code) }
+                    span class="t" { (elapsed(task.started_at, task.finished_at)) }
+                    @if let Some(code) = task.exit_code.filter(|c| *c != 0) { span class="exit" { "exit " (code) } }
                 }
                 div class="log-tools" {
                     label class="log-find" {

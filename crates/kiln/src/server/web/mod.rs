@@ -632,14 +632,13 @@ async fn fragment_build<P: Platform>(
 
 async fn fragment_tasks<P: Platform>(
     State(web): State<Arc<Web<P>>>,
-    user: User,
+    _user: User,
     Path(id): Path<i64>,
     Query(query): Query<AttemptQuery>,
 ) -> WebResult<Response> {
     let build = web.engine.store.build(id)?.ok_or_else(|| WebError::NotFound("build not found".into()))?;
     let data = build_data(&web, build, query.attempt)?;
-    let viewer = viewer(&user);
-    let mut markup = views::sidebar(&context(&web, &viewer), &data, views::default_task(&data.tasks)).into_string();
+    let mut markup = views::sidebar(&data, views::default_task(&data.tasks)).into_string();
     if data.images.iter().any(|i| i.digest.is_some()) {
         markup
             .push_str(&format!("<template data-images>{}</template>", views::images_card(&data.images).into_string()));
