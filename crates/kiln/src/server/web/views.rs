@@ -267,6 +267,10 @@ fn retry_pill(build: &Build, original: Option<&Build>) -> Markup {
     }
 }
 
+fn ref_pill(build: &Build) -> Markup {
+    html! { @if build.trigger != Trigger::Tag || build.version.is_none() { (trigger_pill(build)) } }
+}
+
 fn version_pill(build: &Build) -> Markup {
     match &build.version {
         Some(version) if released(build) => {
@@ -464,7 +468,7 @@ pub fn build_row_live(build: &Build, repo: Option<&Repo>, show_repo: bool, meter
                     }
                 }
             }
-            div class="ref" { (trigger_pill(build)) span class="sha" { (build.short_sha()) } }
+            div class="ref" { (ref_pill(build)) span class="sha" { (build.short_sha()) } }
             div class="version" { (version_pill(build)) }
             div class="when" {
                 span class="duration" { (elapsed(build.started_at, build.finished_at)) }
@@ -509,7 +513,6 @@ pub fn layout(title: &str, nav: &str, ctx: &Context<'_>, attrs: &[(&str, String)
                                 div class="label" { "Signed in as" strong { (ctx.viewer.login) } }
                                 @if ctx.demo { div class="label" { span class="pill warn" { "Demo mode" } } }
                                 hr;
-                                a class="menu-item" href="/system" { (icon(Icon::Server)) "System" }
                                 form method="post" action="/logout" { button class="menu-item" type="submit" { (icon(Icon::LogOut)) "Sign out" } }
                             }
                         }
@@ -941,6 +944,7 @@ pub fn repos_live(rows: &[RepoRow]) -> Markup {
     let (used, other): (Vec<&RepoRow>, Vec<&RepoRow>) =
         rows.iter().filter(|r| r.repo.removed_at.is_none()).partition(|r| r.repo.enrolled);
     let gone: Vec<&RepoRow> = rows.iter().filter(|r| r.repo.removed_at.is_some()).collect();
+    let owners = rows.iter().map(|r| r.repo.owner.as_str()).collect::<std::collections::HashSet<_>>().len();
     html! {
         div class="stack" {
             section class="card" {
@@ -960,7 +964,7 @@ pub fn repos_live(rows: &[RepoRow]) -> Markup {
                                                 span class="repo-glyph" { (initial(&repo.name)) }
                                                 div class="stacked" {
                                                     a class="cover" href=(repo_path(repo)) { strong { (repo.name) } }
-                                                    span { (repo.owner) }
+                                                    @if owners > 1 { span { (repo.owner) } }
                                                 }
                                                 @if repo.paused { span class="pill warn" { (icon(Icon::Pause)) "Paused" } }
                                                 (streak_pill(&row.recent))
@@ -1003,7 +1007,7 @@ pub fn repos_live(rows: &[RepoRow]) -> Markup {
                                         td {
                                             div class="cell" {
                                                 span class="repo-glyph" { (initial(&repo.name)) }
-                                                div class="stacked" { a class="cover" href=(repo_path(repo)) { strong { (repo.name) } } span { (repo.owner) } }
+                                                div class="stacked" { a class="cover" href=(repo_path(repo)) { strong { (repo.name) } } @if owners > 1 { span { (repo.owner) } } }
                                             }
                                         }
                                         td class="when right" { span class="pill" { (icon(Icon::Branch)) (repo.default_branch) } }
@@ -1126,7 +1130,6 @@ pub fn median(builds: &[Build]) -> Option<i64> {
 pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
     let repo = &data.repo;
     let github = format!("{}/{}", ctx.github_web, repo.full_name());
-    let last = data.history.last();
     html! {
         nav class="crumbs" aria-label="Breadcrumb" { a href="/repos" { "Repositories" } span class="sep" { "/" } span { (repo.owner) } }
         div class="page-head" {
@@ -1217,18 +1220,6 @@ pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
                         None => { span class="value" { "–" } span class="foot" { "No passing builds" } },
                     }
                 }
-                @match last {
-                    Some(build) => a class="card tile" href=(build_path(repo, build)) {
-                        span class="label" { (icon(Icon::Activity)) "Latest build" }
-                        span class={"value " (kind(build.state))} { (state_label(build.state)) }
-                        span class="foot" { "#" (build.number) " · " (time(build.created_at)) }
-                    },
-                    None => div class="card tile" {
-                        span class="label" { (icon(Icon::Activity)) "Latest build" }
-                        span class="value" { "–" }
-                        span class="foot" { "No builds yet" }
-                    },
-                }
             }
         }
         div class="columns" {
@@ -1259,22 +1250,6 @@ pub fn repo_live(ctx: &Context<'_>, data: &RepoData) -> Markup {
                 }
             }
             aside class="stack" {
-                section class="card" {
-                    div class="card-head" { h2 { "Releases" } }
-                    @if data.releases.is_empty() {
-                        div class="empty compact" { p { "Nothing released yet" } }
-                    } @else {
-                        ul class="releases" {
-                            @for (version, number, at) in &data.releases {
-                                li {
-                                    span class="pill mono ok" { (icon(Icon::Tag)) (version) }
-                                    a class="grow cover" href={(repo_path(repo)) "/builds/" (number)} { "#" (number) }
-                                    span class="when" { (time(*at)) }
-                                }
-                            }
-                        }
-                    }
-                }
                 @if let Some(config) = &data.config {
                     section class="card" {
                         div class="card-head" { h2 { "Pipeline" } span class="pill mono" { (FILE_NAME) } }
@@ -1420,7 +1395,9 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                     div {
                         h1 { (commit_title(build)) }
                         div class="chips" {
-                            a href=(trigger_url(ctx, repo, build)) target="_blank" rel="noopener" { (trigger_pill(build)) }
+                            @if build.trigger != Trigger::Tag || build.version.is_none() {
+                                a href=(trigger_url(ctx, repo, build)) target="_blank" rel="noopener" { (trigger_pill(build)) }
+                            }
                             a class="mono" href=(commit_url) target="_blank" rel="noopener" title="Open the commit on GitHub" { (icon(Icon::Commit)) (build.short_sha()) }
                             (version_pill(build))
                             (retry_pill(build, data.rerun_of.as_ref()))
@@ -1830,7 +1807,6 @@ pub fn system(ctx: &Context<'_>, data: &SystemData) -> Markup {
                 div class="card tile" {
                     span class="label" { (icon(Icon::Layers)) "Version" }
                     span class="value mono" { (VERSION) }
-                    span class="foot" { @if ctx.demo { "Demo mode" } @else { "Running" } }
                 }
                 div class="card tile" {
                     span class="label" { (icon(Icon::Gauge)) "Build slots" }
@@ -1860,7 +1836,11 @@ pub fn system(ctx: &Context<'_>, data: &SystemData) -> Markup {
                                     div class="what" {
                                         strong { (entry.actor) } " "
                                         @match (entry.action.as_str(), entry.detail.as_deref().and_then(|d| d.split_once(' '))) {
-                                            ("image_released", Some((reference, digest))) => {
+                                            ("image_released", _) if entry.detail.as_deref().is_some_and(|d| d.contains(", ")) => {
+                                                "released " code { (entry.detail.clone().unwrap_or_default()) }
+                                                @if let Some((link, label)) = target { " from " a href=(link) { (label) } }
+                                            },
+                                            ("image_released", Some((reference, digest))) if digest.starts_with("sha256:") => {
                                                 "released " code { (reference.rsplit('/').next().unwrap_or(reference)) }
                                                 @if let Some((link, label)) = target { " from " a href=(link) { (label) } }
                                                 span class="detail mono" title=(digest) { (&digest[..digest.len().min(19)]) }
@@ -1935,8 +1915,7 @@ pub fn settings(ctx: &Context<'_>, data: &SettingsData) -> Markup {
                         h2 { (icon(Icon::Key)) "Registry" }
                         @if data.secrets_error.is_some() { span class="pill bad" { "Secrets failed" } }
                         @else if let (true, Some(note)) = (data.has_token, &ctx.registry_note) { span class="pill warn" { (note) } }
-                        @else if data.has_token { span class="pill ok" { "Token saved" } }
-                        @else { span class="pill warn" { "No token" } }
+                        @else if !data.has_token { span class="pill warn" { "No token" } }
                     }
                     form class="settings-form" method="post" action="/settings/registry"
                         data-confirm="Kiln restarts to use the new token. Running builds continue." data-confirm-title="Save the registry token?" data-confirm-action="Save" {

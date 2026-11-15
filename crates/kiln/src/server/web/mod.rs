@@ -979,7 +979,6 @@ async fn system<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebR
     let viewer = viewer(&user);
     let settings = &web.engine.settings;
     let mut facts = vec![
-        ("Build slots", settings.slots.to_string()),
         ("Owners", settings.owners.join(", ")),
         ("Registry", settings.registry.clone()),
         ("Build namespace", settings.runner.namespace.clone()),
@@ -990,7 +989,7 @@ async fn system<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebR
     ];
     facts.extend(web.engine.platform.status());
     let store = &web.engine.store;
-    let mut audit = Vec::new();
+    let mut audit: Vec<(kiln_store::AuditEntry, Option<(String, String)>)> = Vec::new();
     for entry in store.audit_log(100)? {
         let target = match entry.build_id {
             Some(id) => store.build(id)?.and_then(|build| {
@@ -1007,6 +1006,27 @@ async fn system<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) -> WebR
         };
         let detail =
             entry.detail.clone().filter(|d| target.as_ref().is_none_or(|(_, label)| !d.ends_with(label.as_str())));
+        let image = |d: &str| {
+            let reference = d.split(' ').next().unwrap_or(d);
+            let name = reference.rsplit('/').next().unwrap_or(reference);
+            name.split_once(':').map(|(n, v)| (n.to_owned(), v.to_owned()))
+        };
+        if entry.action == "image_released"
+            && let Some((last, _)) = audit.last_mut()
+            && last.action == "image_released"
+            && last.build_id == entry.build_id
+            && let (Some((name, version)), Some(previous)) = (
+                detail.as_deref().and_then(image),
+                last.detail.as_deref().map(|d| d.split(' ').next().unwrap_or(d).to_owned()),
+            )
+        {
+            let names = match previous.rsplit_once(':') {
+                Some((names, kept)) if kept == version => names.rsplit('/').next().unwrap_or(names).to_owned(),
+                _ => previous.clone(),
+            };
+            last.detail = Some(format!("{names}, {name}:{version}"));
+            continue;
+        }
         audit.push((kiln_store::AuditEntry { detail, ..entry }, target));
     }
     let repos = store.repos()?;
