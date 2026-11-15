@@ -1430,11 +1430,10 @@ fn banner(build: &Build, ahead: Option<usize>) -> Markup {
     let title = headline(build);
     let show_detail = (!detail.is_empty() && !title.contains(detail.lines().next().unwrap_or_default())) || config;
     let quiet = matches!(build.state, BuildState::Running | BuildState::Starting) && !show_detail;
-    if quiet || (build.state == BuildState::Succeeded && !show_detail && title == "Passed") {
+    if quiet || build.state == BuildState::Succeeded {
         return html! {};
     }
     let glyph = match build.state {
-        BuildState::Succeeded if released(build) => Icon::Rocket,
         BuildState::Queued => Icon::Clock,
         BuildState::Failed | BuildState::Errored => Icon::Alert,
         state => state_icon(state),
