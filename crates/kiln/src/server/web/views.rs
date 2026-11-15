@@ -300,7 +300,7 @@ fn initial(name: &str) -> String {
 
 pub struct Live {
     pub finish: Option<i64>,
-    pub samples: Vec<crate::server::usage::Sample>,
+    pub samples: Vec<kiln_store::UsageSample>,
 }
 
 #[derive(Default)]
@@ -378,9 +378,14 @@ pub fn resources_card(build: &Build, live: &Live) -> Markup {
     let points: Vec<[f64; 4]> =
         live.samples.iter().map(|s| [s.cpu, s.memory, s.limit.unwrap_or(0.0), s.request.unwrap_or(0.0)]).collect();
     let last = live.samples.last();
-    let peak = |pick: fn(&crate::server::usage::Sample) -> f64| {
+    let done = build.state.is_finished();
+    let peak = |pick: fn(&kiln_store::UsageSample) -> f64| {
         live.samples.iter().map(pick).fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))))
     };
+    let average = |pick: fn(&kiln_store::UsageSample) -> f64| {
+        (!live.samples.is_empty()).then(|| live.samples.iter().map(pick).sum::<f64>() / live.samples.len() as f64)
+    };
+    let shown = |pick: fn(&kiln_store::UsageSample) -> f64| if done { average(pick) } else { last.map(pick) };
     let dash = || "–".to_owned();
     let chart = || {
         html! {
@@ -392,7 +397,7 @@ pub fn resources_card(build: &Build, live: &Live) -> Markup {
         }
     };
     html! {
-        section class="card resources" data-usage=(build.id) data-points=(serde_json::to_string(&points).unwrap_or_default()) {
+        section class="card resources" data-usage=(build.id) data-done[done] data-points=(serde_json::to_string(&points).unwrap_or_default()) {
             div class="card-head" {
                 h2 { "Resources" }
                 @if live.finish.is_some() { span class="eta" data-eta {} }
@@ -403,11 +408,11 @@ pub fn resources_card(build: &Build, live: &Live) -> Markup {
             div class="metrics" hidden[last.is_none()] {
                 div class="metric cpu" {
                     div class="metric-head" {
-                        span class="label" { "CPU" }
+                        span class="label" { "CPU" @if done { " average" } }
                         span class="peak" { "peak " span class="pv" { (peak(|s| s.cpu).map(cores_text).unwrap_or_else(dash)) } }
                     }
                     div class="now" {
-                        span class="v" { (last.map(|s| cores_text(s.cpu)).unwrap_or_else(dash)) }
+                        span class="v" { (shown(|s| s.cpu).map(cores_text).unwrap_or_else(dash)) }
                         span class="unit" { " cores" }
                         span class="ref-text" { (last.and_then(|s| s.request).map(|r| format!(" · request {}", cores_text(r))).unwrap_or_default()) }
                     }
@@ -418,11 +423,11 @@ pub fn resources_card(build: &Build, live: &Live) -> Markup {
                 }
                 div class="metric mem" {
                     div class="metric-head" {
-                        span class="label" { "Memory" }
+                        span class="label" { "Memory" @if done { " average" } }
                         span class="peak" { "peak " span class="pv" { (peak(|s| s.memory).map(memory_text).unwrap_or_else(dash)) } }
                     }
                     div class="now" {
-                        span class="v" { (last.map(|s| memory_text(s.memory)).unwrap_or_else(dash)) }
+                        span class="v" { (shown(|s| s.memory).map(memory_text).unwrap_or_else(dash)) }
                         span class="unit" { (last.and_then(|s| s.limit).map(|l| format!(" of {}", memory_text(l))).unwrap_or_default()) }
                     }
                     div class="meter" role="meter" aria-label="Memory in use" aria-valuemin="0" {

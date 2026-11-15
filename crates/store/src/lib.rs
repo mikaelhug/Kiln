@@ -409,6 +409,32 @@ impl Store {
         Ok(())
     }
 
+    pub fn add_usage(&self, build: i64, sample: &UsageSample) -> Result<bool> {
+        let added = self.conn().execute(
+            "INSERT OR IGNORE INTO usage (build_id, at, cpu, memory, memory_limit, cpu_request)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6 WHERE ?2 > COALESCE((SELECT MAX(at) FROM usage WHERE build_id = ?1), 0)",
+            params![build, sample.at, sample.cpu, sample.memory, sample.limit, sample.request],
+        )?;
+        Ok(added == 1)
+    }
+
+    pub fn usage(&self, build: i64) -> Result<Vec<UsageSample>> {
+        let conn = self.conn();
+        let mut statement = conn
+            .prepare("SELECT at, cpu, memory, memory_limit, cpu_request FROM usage WHERE build_id = ?1 ORDER BY at")?;
+        Ok(statement
+            .query_map([build], |row| {
+                Ok(UsageSample {
+                    at: row.get(0)?,
+                    cpu: row.get(1)?,
+                    memory: row.get(2)?,
+                    limit: row.get(3)?,
+                    request: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn raise_task_peak(&self, build: i64, attempt: i64, ordinal: i64, cpu_milli: i64, memory: i64) -> Result<()> {
         self.conn().execute(
             "UPDATE tasks SET peak_cpu_milli = MAX(COALESCE(peak_cpu_milli, 0), ?4),
@@ -753,7 +779,7 @@ impl Store {
                 .collect::<rusqlite::Result<_>>()?
         };
         for id in &expired {
-            for table in ["steps", "tasks", "images", "checks", "outbox"] {
+            for table in ["steps", "tasks", "images", "checks", "outbox", "usage"] {
                 tx.execute(&format!("DELETE FROM {table} WHERE build_id = ?1"), [id])?;
             }
             tx.execute("UPDATE builds SET rerun_of = NULL WHERE rerun_of = ?1", [id])?;

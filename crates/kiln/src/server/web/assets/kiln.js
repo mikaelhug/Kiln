@@ -91,7 +91,9 @@ function drawResources(card) {
   let points = [];
   try { points = JSON.parse(card.dataset.points || "[]"); } catch (_) {}
   if (!points.length) return;
-  const last = points[points.length - 1];
+  const last = card.hasAttribute("data-done")
+    ? [0, 1, 2, 3].map((i) => points.reduce((sum, p) => sum + (p[i] || 0), 0) / points.length)
+    : points[points.length - 1];
   const limit = Math.max(...points.map((p) => p[2] || 0));
   const request = Math.max(...points.map((p) => p[3] || 0));
   const peaks = [Math.max(...points.map((p) => p[0])), Math.max(...points.map((p) => p[1]))];

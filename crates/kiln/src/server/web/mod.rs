@@ -377,7 +377,7 @@ fn live_info<P: Platform>(
 ) -> views::Live {
     views::Live {
         finish: views::finish_estimate(tasks, usual, unix_now()),
-        samples: web.engine.usage.history(build.id),
+        samples: web.engine.store.usage(build.id).unwrap_or_default(),
     }
 }
 
@@ -597,7 +597,13 @@ fn build_data<P: Platform>(
         let current = if attempt == build.attempt { tasks.clone() } else { store.tasks(build.id, build.attempt)? };
         Ok::<_, WebError>(live_info(web, &build, &usual, &current))
     });
-    let live = live.transpose()?;
+    let live = match live.transpose()? {
+        Some(live) => Some(live),
+        None => {
+            let samples = store.usage(build.id)?;
+            (!samples.is_empty()).then_some(views::Live { finish: None, samples })
+        }
+    };
     Ok(views::BuildData { ahead, repo, build, attempt, tasks, images, rerun_of, live, usual })
 }
 

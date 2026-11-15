@@ -9,7 +9,6 @@ pub mod platform;
 pub mod settings;
 #[cfg(test)]
 mod tests;
-pub mod usage;
 mod web;
 
 use std::net::SocketAddr;

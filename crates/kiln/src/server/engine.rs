@@ -14,14 +14,13 @@ use kiln_runner::k8s_openapi::api::core::v1::Pod;
 use kiln_runner::{ATTEMPT_LABEL, BUILD_LABEL, Marker, Outcome, Plan, Scope, cache_claim_name, parse_marker, pod_name};
 use kiln_store::{
     AuditEntry, Build, BuildFilter, BuildState, BuildUpdate, EtagKind, Failure, NewBuild, Phase, Repo, RepoSync,
-    Retention, StepUpdate, Store, Task, TaskKind, TaskState, TaskUpdate, Trigger,
+    Retention, StepUpdate, Store, Task, TaskKind, TaskState, TaskUpdate, Trigger, UsageSample,
 };
 use tokio::sync::{Notify, mpsc};
 
 use super::logs::{Event, Logs};
 use super::platform::{Platform, PodEvent, PodRejected};
 use super::settings::Settings;
-use super::usage::{Sample, Usage};
 
 const PULL_GRACE_SECS: i64 = 180;
 const PENDING_LIMIT_SECS: i64 = 15 * 60;
@@ -40,7 +39,6 @@ pub struct Engine<P: Platform> {
     fetch_tokens: Mutex<HashMap<(i64, i64), String>>,
     releasing: Mutex<HashSet<i64>>,
     dispatching: Mutex<HashSet<i64>>,
-    pub usage: Usage,
 }
 
 fn now() -> i64 {
@@ -68,7 +66,6 @@ impl<P: Platform> Engine<P> {
             fetch_tokens: Mutex::new(HashMap::new()),
             releasing: Mutex::new(HashSet::new()),
             dispatching: Mutex::new(HashSet::new()),
-            usage: Usage::default(),
         })
     }
 
@@ -92,9 +89,6 @@ impl<P: Platform> Engine<P> {
     }
 
     fn changed(&self, build: &Build) {
-        if build.state.is_finished() {
-            self.usage.forget(build.id);
-        }
         let _ = self.logs.events().send(Event::Build { build: build.id, repo: build.repo_id });
         if let Err(error) = self.store.enqueue(build.id, "check", &serde_json::json!({}), now()) {
             tracing::warn!(%error, build = build.id, "queueing the GitHub check update failed");
@@ -1557,8 +1551,7 @@ impl<P: Platform> Engine<P> {
             } else {
                 (watched.iter().map(|w| w.1).sum(), Some(watched.iter().map(|w| w.2 as f64).sum()))
             };
-            let sample = Sample { at, cpu, memory, limit, request };
-            if !self.usage.record(build.id, sample) {
+            if !self.store.add_usage(build.id, &UsageSample { at, cpu, memory, limit, request })? {
                 continue;
             }
             for task in tasks.iter().filter(|t| t.state == TaskState::Running) {

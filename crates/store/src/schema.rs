@@ -211,6 +211,17 @@ ALTER TABLE tasks ADD COLUMN total_steps INTEGER;
     r"
 ALTER TABLE tasks ADD COLUMN cpu_request_milli INTEGER;
 ",
+    r"
+CREATE TABLE usage (
+    build_id INTEGER NOT NULL REFERENCES builds (id),
+    at INTEGER NOT NULL,
+    cpu REAL NOT NULL,
+    memory REAL NOT NULL,
+    memory_limit REAL,
+    cpu_request REAL,
+    PRIMARY KEY (build_id, at)
+);
+",
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

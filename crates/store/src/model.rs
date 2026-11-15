@@ -329,6 +329,15 @@ pub struct Session {
     pub agent: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct UsageSample {
+    pub at: i64,
+    pub cpu: f64,
+    pub memory: f64,
+    pub limit: Option<f64>,
+    pub request: Option<f64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AuditEntry {
     pub at: i64,
