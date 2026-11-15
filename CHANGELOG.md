@@ -4,6 +4,8 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+- Build pods start: the image keeps its binary at `/usr/local/bin/kiln`, so the helper's `/kiln/bin` mount no longer collides with it.
+- A container that cannot start shows the runtime's reason instead of "exited with code 128", and its duration no longer counts from 1970.
 - Live updates cover every page: steps update as they start and finish, releases show each image as it is published, System and Settings follow changes, and a browser that misses events catches up instead of going stale.
 - Every push to `main` publishes a tested `X.Y.(Z+1)-rc.N` image, so image automation can follow the latest Kiln.
 - `KILN_IMAGE` is optional: a release knows its own image, so image automation only updates the server image.

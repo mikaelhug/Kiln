@@ -14,9 +14,9 @@ COPY --from=build /kiln /kiln
 
 FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build /kiln /kiln
+COPY --from=build /kiln /usr/local/bin/kiln
 COPY --from=build --chmod=1777 /scratch-tmp /tmp
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 USER 10001:10001
-ENTRYPOINT ["/kiln"]
+ENTRYPOINT ["/usr/local/bin/kiln"]
 CMD ["serve"]

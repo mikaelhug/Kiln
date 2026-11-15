@@ -69,17 +69,34 @@ pub fn observe(pod: &Pod, tasks: &[Task], now: i64, pull_grace: i64) -> Observat
         let mut update = TaskUpdate::default();
         if let Some(running) = &state.running {
             update.state = Some(TaskState::Running);
-            update.started_at = running.started_at.as_ref().map(|t| t.0.as_second());
+            update.started_at = running.started_at.as_ref().map(|t| t.0.as_second()).filter(|t| *t > 0);
         }
         if let Some(terminated) = &state.terminated {
-            update.started_at = terminated.started_at.as_ref().map(|t| t.0.as_second());
+            update.started_at = terminated.started_at.as_ref().map(|t| t.0.as_second()).filter(|t| *t > 0);
             update.finished_at = terminated.finished_at.as_ref().map(|t| t.0.as_second()).or(Some(now));
             update.exit_code = Some(i64::from(terminated.exit_code));
             update.reason = terminated.reason.clone();
             let oom = terminated.reason.as_deref() == Some("OOMKilled");
+            let unstartable = matches!(terminated.reason.as_deref(), Some("StartError" | "ContainerCannotRun"));
             update.state = Some(if terminated.exit_code == 0 { TaskState::Passed } else { TaskState::Failed });
             if terminated.exit_code != 0 && first_failure.is_none() {
-                first_failure = Some(if oom {
+                first_failure = Some(if unstartable {
+                    let message = terminated.message.as_deref().unwrap_or_default();
+                    let why: String = ["container init: ", "runc create failed: ", "OCI runtime create failed: "]
+                        .iter()
+                        .find_map(|marker| message.split_once(marker).map(|(_, rest)| rest))
+                        .unwrap_or(message)
+                        .trim()
+                        .chars()
+                        .take(300)
+                        .collect();
+                    let failure = if matches!(task.kind, TaskKind::Test | TaskKind::Verify) {
+                        Failure::Config
+                    } else {
+                        Failure::Setup
+                    };
+                    (failure, format!("{} could not start its container: {why}", task_label(task)))
+                } else if oom {
                     (
                         Failure::OutOfMemory,
                         format!("{} ran out of memory; raise its resources.memory", task_label(task)),
