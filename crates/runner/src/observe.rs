@@ -28,6 +28,7 @@ pub fn observe(pod: &Pod, tasks: &[Task], now: i64, pull_grace: i64) -> Observat
     let mut first_failure: Option<(Failure, String)> = None;
     let mut sidecar_exits = Vec::new();
     let mut sidecar_restarts = Vec::new();
+    let mut service_failure = None;
 
     let since = pod.metadata.creation_timestamp.as_ref().map(|t| t.0.as_second()).unwrap_or(now);
     for container in &statuses {
@@ -39,6 +40,9 @@ pub fn observe(pod: &Pod, tasks: &[Task], now: i64, pull_grace: i64) -> Observat
             }
             if container.restart_count > 0 {
                 sidecar_restarts.push((container.name.clone(), container.restart_count));
+                if container.name != "buildkitd" && service_failure.is_none() {
+                    service_failure = Some(format!("the service in {} stopped or never started", container.name));
+                }
             }
             if let Some(waiting) = &state.waiting {
                 let pulling = matches!(waiting.reason.as_deref(), Some("ImagePullBackOff" | "ErrImagePull"));
@@ -111,6 +115,8 @@ pub fn observe(pod: &Pod, tasks: &[Task], now: i64, pull_grace: i64) -> Observat
     let message = status.message.clone().unwrap_or_default();
     let outcome = if let Some(detail) = config_error {
         Outcome::Failed { failure: Failure::Config, detail }
+    } else if let Some(detail) = service_failure {
+        Outcome::Failed { failure: Failure::Step, detail }
     } else if reason == "DeadlineExceeded" {
         Outcome::Failed { failure: Failure::Timeout, detail: "the build ran past its timeout".into() }
     } else if reason == "Evicted" {
@@ -287,5 +293,22 @@ mod tests {
         let pressure =
             pod(json!({ "phase": "Failed", "reason": "Evicted", "message": "The node was low on resource: memory." }));
         assert!(matches!(observe(&pressure, &tasks, 0, 120).outcome, Outcome::Infra { .. }));
+    }
+
+    #[test]
+    fn a_service_that_restarts_fails_the_build_but_buildkit_restarts_are_left_to_retry() {
+        let tasks = [task(0, TaskKind::Fetch, "fetch"), task(1, TaskKind::Verify, "verify-smoke")];
+        let mut service = waiting("verify-smoke-svc0", "app", "CrashLoopBackOff");
+        service["restartCount"] = json!(1);
+        let crashing = pod(json!({ "phase": "Pending", "initContainerStatuses": [
+            terminated("fetch", 0, "Completed"), service] }));
+        assert!(matches!(observe(&crashing, &tasks, 0, 120).outcome, Outcome::Failed { failure: Failure::Step, .. }));
+        let mut buildkit = waiting("buildkitd", "buildkit", "CrashLoopBackOff");
+        buildkit["restartCount"] = json!(1);
+        let restarted = pod(json!({ "phase": "Pending", "initContainerStatuses": [
+            terminated("fetch", 0, "Completed"), buildkit] }));
+        let seen = observe(&restarted, &tasks, 0, 120);
+        assert!(matches!(seen.outcome, Outcome::Pending { .. }));
+        assert_eq!(seen.sidecar_restarts, vec![("buildkitd".to_owned(), 1)]);
     }
 }

@@ -259,6 +259,16 @@ pub fn is_quantity(value: &str) -> bool {
     QUANTITY.is_match(value)
 }
 
+fn check_resources(at: &str, resources: &Resources, out: &mut Vec<Diagnostic>) {
+    for (name, value) in [("cpu", &resources.cpu), ("memory", &resources.memory)] {
+        if let Some(value) = value
+            && !QUANTITY.is_match(value)
+        {
+            out.push(diagnostic(format!("{at}.resources.{name}"), format!("{value:?} is not a Kubernetes quantity")));
+        }
+    }
+}
+
 const RESERVED_PATHS: [&str; 6] = ["/workspace", "/kiln", "/proc", "/sys", "/dev", "/etc/resolv.conf"];
 
 fn diagnostic(path: impl Into<String>, message: impl Into<String>) -> Diagnostic {
@@ -290,16 +300,7 @@ fn validate(config: &Config) -> Vec<Diagnostic> {
                 out.push(diagnostic(format!("{at}.{field}"), message));
             }
         }
-        for (name, value) in [("cpu", &image.resources.cpu), ("memory", &image.resources.memory)] {
-            if let Some(value) = value
-                && !QUANTITY.is_match(value)
-            {
-                out.push(diagnostic(
-                    format!("{at}.resources.{name}"),
-                    format!("{value:?} is not a Kubernetes quantity"),
-                ));
-            }
-        }
+        check_resources(&at, &image.resources, &mut out);
         if image.platforms.is_empty() {
             out.push(diagnostic(format!("{at}.platforms"), "at least one platform is required"));
         }
@@ -350,13 +351,7 @@ fn validate_job(at: &str, job: &Job, verify: bool, images: &HashSet<&str>, out: 
     {
         out.push(diagnostic(format!("{at}.timeout"), "timeouts are capped at 2h"));
     }
-    for (name, value) in [("cpu", &job.resources.cpu), ("memory", &job.resources.memory)] {
-        if let Some(value) = value
-            && !QUANTITY.is_match(value)
-        {
-            out.push(diagnostic(format!("{at}.resources.{name}"), format!("{value:?} is not a Kubernetes quantity")));
-        }
-    }
+    check_resources(at, &job.resources, out);
     for key in job.env.keys() {
         if !ENV_NAME.is_match(key) {
             out.push(diagnostic(format!("{at}.env.{key}"), "environment names are letters, digits and underscores"));
@@ -395,6 +390,9 @@ fn validate_job(at: &str, job: &Job, verify: bool, images: &HashSet<&str>, out: 
             out.push(diagnostic(format!("{here}.name"), "service names are lowercase letters, digits and dashes"));
         } else if !service_names.insert(service.name.as_str()) {
             out.push(diagnostic(format!("{here}.name"), format!("service {:?} is listed twice", service.name)));
+        }
+        if service.port == Some(0) {
+            out.push(diagnostic(format!("{here}.port"), "ports are 1 to 65535"));
         }
         if service.user == Some(0) {
             out.push(diagnostic(format!("{here}.user"), "services run as a non-root user; pick a uid above 0"));

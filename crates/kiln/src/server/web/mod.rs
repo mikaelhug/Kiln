@@ -732,13 +732,7 @@ async fn settings_page<P: Platform>(State(web): State<Arc<Web<P>>>, user: User) 
         registry: web.engine.settings.registry.clone(),
         registry_username: web.engine.settings.registry_username.clone(),
         has_token: web.engine.settings.registry_password.is_some(),
-        secrets_error: web
-            .engine
-            .platform
-            .status()
-            .into_iter()
-            .find(|(key, value)| *key == "Registry secrets" && value != "ok")
-            .map(|(_, value)| value),
+        secrets_error: web.engine.platform.registry_secrets_error(),
         you: user.login.clone(),
     };
     Ok(render(views::settings(&context(&web, &viewer), &data)))

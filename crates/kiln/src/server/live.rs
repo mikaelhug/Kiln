@@ -133,6 +133,10 @@ impl Platform for Live {
         vec![("GitHub API", remaining), ("Registry secrets", secrets)]
     }
 
+    fn registry_secrets_error(&self) -> Option<String> {
+        self.registry_secrets.clone()
+    }
+
     async fn repositories(&self) -> Result<Vec<RepoInfo>> {
         let mut out = Vec::new();
         for installation in self.github.installations().await? {

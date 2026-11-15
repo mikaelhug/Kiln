@@ -586,23 +586,28 @@ fn builder_resources(images: &[kiln_core::config::Image]) -> Resources {
     Resources { cpu: largest(|r| &r.cpu), memory: largest(|r| &r.memory) }
 }
 
+fn split_quantity(quantity: &str) -> Option<(f64, &str)> {
+    let split = quantity.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(quantity.len());
+    let (number, unit) = quantity.split_at(split);
+    Some((number.parse::<f64>().ok()?, unit))
+}
+
 fn quantity_value(quantity: &str) -> f64 {
-    let number = quantity.trim_end_matches(|c: char| c.is_ascii_alphabetic());
-    let scale = match &quantity[number.len()..] {
+    let Some((number, unit)) = split_quantity(quantity) else { return 0.0 };
+    let scale = match unit {
+        "" => 1.0,
         "m" => 0.001,
         "Ki" => 1024.0,
         "Mi" => 1024.0 * 1024.0,
         "Gi" => 1024.0 * 1024.0 * 1024.0,
-        _ => 1.0,
+        _ => 0.0,
     };
-    number.parse::<f64>().unwrap_or(0.0) * scale
+    number * scale
 }
 
 fn scale_quantity(quantity: &str, factor: u32) -> Option<String> {
-    let split = quantity.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(quantity.len());
-    let (number, unit) = quantity.split_at(split);
-    let scaled = number.parse::<f64>().ok()? * f64::from(factor);
-    let text = format!("{scaled:.3}");
+    let (number, unit) = split_quantity(quantity)?;
+    let text = format!("{:.3}", number * f64::from(factor));
     Some(format!("{}{unit}", text.trim_end_matches('0').trim_end_matches('.')))
 }
 
