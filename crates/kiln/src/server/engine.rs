@@ -788,7 +788,7 @@ impl<P: Platform> Engine<P> {
         };
         let rendered = kiln_runner::render(&plan, &self.settings.runner).map_err(Refusal::config)?;
         self.store.replace_tasks(build.id, build.attempt, &rendered.tasks)?;
-        self.record_memory_limits(build, &rendered.pod)?;
+        self.record_resources(build, &rendered.pod)?;
         let name = pod_name(build.id, build.attempt);
         if let Err(error) = self.platform.create_pod(&rendered.pod).await {
             if let Some(rejected) = error.downcast_ref::<PodRejected>() {
@@ -1478,20 +1478,28 @@ impl<P: Platform> Engine<P> {
         }
     }
 
-    fn record_memory_limits(&self, build: &Build, pod: &Pod) -> Result<()> {
+    fn record_resources(&self, build: &Build, pod: &Pod) -> Result<()> {
         let containers = pod.spec.as_ref().and_then(|s| s.init_containers.clone()).unwrap_or_default();
-        let limit = |name: &str| {
+        let quantity = |name: &str, limits: bool, key: &str| {
             containers
                 .iter()
                 .find(|c| c.name == name)
-                .and_then(|c| c.resources.as_ref()?.limits.as_ref()?.get("memory").map(|q| q.0.clone()))
-                .map(|q| kiln_runner::quantity_value(&q) as i64)
+                .and_then(|c| {
+                    let resources = c.resources.as_ref()?;
+                    let set = if limits { resources.limits.as_ref()? } else { resources.requests.as_ref()? };
+                    set.get(key).map(|q| q.0.clone())
+                })
+                .map(|q| kiln_runner::quantity_value(&q))
         };
         for task in self.store.tasks(build.id, build.attempt)? {
             let source = if task.kind == TaskKind::Image { "buildkitd" } else { task.container.as_str() };
-            if let Some(bytes) = limit(source) {
-                self.store.set_task_memory_limit(build.id, build.attempt, &task.container, bytes)?;
-            }
+            self.store.set_task_resources(
+                build.id,
+                build.attempt,
+                &task.container,
+                quantity(source, true, "memory").map(|b| b as i64),
+                quantity(source, false, "cpu").map(|c| (c * 1000.0).round() as i64),
+            )?;
         }
         Ok(())
     }
@@ -1522,21 +1530,31 @@ impl<P: Platform> Engine<P> {
             let at = containers.iter().map(|c| c.at).max().unwrap_or_else(now);
             let tasks = self.store.tasks(build.id, build.attempt)?;
             let mut watched: Vec<(&str, f64, i64)> = Vec::new();
+            let mut sources: Vec<&str> = Vec::new();
+            let mut request = 0.0;
+            let mut running = Vec::new();
             for task in tasks.iter().filter(|t| t.state == TaskState::Running) {
                 let source = if task.kind == TaskKind::Image { "buildkitd" } else { task.container.as_str() };
+                running.push(task.ordinal);
+                if sources.contains(&source) {
+                    continue;
+                }
+                sources.push(source);
+                request += task.cpu_request_milli.unwrap_or_default() as f64 / 1000.0;
                 if let (Some(used), Some(limit)) =
                     (containers.iter().find(|c| c.container == source), task.memory_limit)
-                    && !watched.iter().any(|(name, ..)| *name == source)
                 {
                     watched.push((source, used.memory, limit));
                 }
             }
+            let request = (request > 0.0).then_some(request);
             let (memory, limit) = if watched.is_empty() {
                 (containers.iter().map(|c| c.memory).sum(), None)
             } else {
                 (watched.iter().map(|w| w.1).sum(), Some(watched.iter().map(|w| w.2 as f64).sum()))
             };
-            if !self.usage.record(build.id, Sample { at, cpu, memory, limit }) {
+            let sample = Sample { at, cpu, memory, limit, request, tasks: running.clone() };
+            if !self.usage.record(build.id, sample) {
                 continue;
             }
             for task in tasks.iter().filter(|t| t.state == TaskState::Running) {
@@ -1551,7 +1569,15 @@ impl<P: Platform> Engine<P> {
                     )?;
                 }
             }
-            let _ = self.logs.events().send(Event::Usage { build: build.id, repo: build.repo_id, cpu, memory, limit });
+            let _ = self.logs.events().send(Event::Usage {
+                build: build.id,
+                repo: build.repo_id,
+                cpu,
+                memory,
+                limit,
+                request,
+                tasks: running,
+            });
         }
         Ok(())
     }

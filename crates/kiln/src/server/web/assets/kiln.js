@@ -78,42 +78,77 @@ function roughly(seconds) {
   return duration(Math.round(seconds / 60) * 60);
 }
 
-function cpuText(cores) {
-  return cores < 0.095 ? `${Math.round(cores * 1000)}m CPU` : `${cores.toFixed(1)} CPU`;
-}
-
 function memoryText(bytes) {
   const gib = bytes / 1073741824;
   return gib >= 1 ? `${gib.toFixed(1)} GiB` : `${Math.round(bytes / 1048576)} MiB`;
 }
 
-function drawUsage(el) {
+function coresText(cores) {
+  return cores < 0.1 ? cores.toFixed(2) : cores.toFixed(1);
+}
+
+function drawResources(card) {
   let points = [];
-  try { points = JSON.parse(el.dataset.points || "[]"); } catch (_) {}
-  const trend = el.querySelector(".trend");
-  if (!trend) return;
-  trend.classList.toggle("hidden", points.length < 4);
-  if (points.length < 4) return;
+  try { points = JSON.parse(card.dataset.points || "[]"); } catch (_) {}
+  if (!points.length) return;
+  const last = points[points.length - 1];
   const limit = Math.max(...points.map((p) => p[2] || 0));
-  const top = [Math.max(1, ...points.map((p) => p[0])), Math.max(limit, ...points.map((p) => p[1])) || 1];
-  const step = 100 / (points.length - 1);
-  const line = (index) => points.map((p, i) => `${(i * step).toFixed(1)},${(22 - (p[index] / top[index]) * 20).toFixed(1)}`).join(" ");
-  trend.querySelector("polyline.cpu").setAttribute("points", line(0));
-  trend.querySelector("polyline.mem").setAttribute("points", line(1));
-  trend.querySelector("line.limit").classList.toggle("hidden", !limit);
+  const request = Math.max(...points.map((p) => p[3] || 0));
+  const peaks = [Math.max(...points.map((p) => p[0])), Math.max(...points.map((p) => p[1]))];
+  const scales = [Math.max(request * 2, peaks[0] * 1.15, 1), limit || peaks[1] * 1.25 || 1];
+  const refs = [request, limit];
+  card.querySelectorAll(".metric").forEach((metric, index) => {
+    const scale = scales[index];
+    const share = (value) => Math.min(value / scale, 1);
+    const meter = metric.querySelector(".meter");
+    meter.querySelector(".fill").style.transform = `scaleX(${share(last[index]).toFixed(4)})`;
+    meter.querySelector(".peak-mark").style.left = `${(share(peaks[index]) * 100).toFixed(2)}%`;
+    const refMark = meter.querySelector(".ref-mark");
+    if (refMark) {
+      refMark.hidden = !refs[index];
+      refMark.style.left = `${(share(refs[index]) * 100).toFixed(2)}%`;
+    }
+    meter.setAttribute("aria-valuemax", scale.toFixed(2));
+    meter.setAttribute("aria-valuenow", last[index].toFixed(2));
+    if (index === 1) {
+      const used = limit ? last[1] / limit : 0;
+      metric.classList.toggle("warn", used >= 0.75 && used < 0.9);
+      metric.classList.toggle("bad", used >= 0.9);
+    }
+    const area = metric.querySelector(".area");
+    area.classList.toggle("hidden", points.length < 3);
+    if (points.length >= 3) {
+      const step = 100 / (points.length - 1);
+      const y = (value) => (40 - share(value) * 38).toFixed(2);
+      const line = points.map((p, i) => `${i ? "L" : "M"}${(i * step).toFixed(2)},${y(p[index])}`).join(" ");
+      area.querySelector(".line").setAttribute("d", line);
+      area.querySelector(".under").setAttribute("d", `${line} L100,40 L0,40 Z`);
+      const ref = area.querySelector(".ref");
+      ref.classList.toggle("hidden", !refs[index]);
+      ref.setAttribute("y1", y(refs[index]));
+      ref.setAttribute("y2", y(refs[index]));
+    }
+  });
 }
 
 function onUsage(event) {
-  for (const el of document.querySelectorAll(`[data-usage="${event.build}"]`)) {
+  for (const card of document.querySelectorAll(`[data-usage="${event.build}"]`)) {
     let points = [];
-    try { points = JSON.parse(el.dataset.points || "[]"); } catch (_) {}
-    points.push([event.cpu, event.memory, event.limit || 0]);
-    el.dataset.points = JSON.stringify(points.slice(-60));
-    el.querySelector(".cpu .v").textContent = cpuText(event.cpu);
-    el.querySelector(".mem .v").textContent = memoryText(event.memory);
-    const of = el.querySelector(".mem .of");
-    if (of) of.textContent = event.limit ? ` of ${memoryText(event.limit)}` : "";
-    drawUsage(el);
+    try { points = JSON.parse(card.dataset.points || "[]"); } catch (_) {}
+    points.push([event.cpu, event.memory, event.limit || 0, event.request || 0]);
+    points = points.slice(-60);
+    card.dataset.points = JSON.stringify(points);
+    const set = (selector, text) => { const el = card.querySelector(selector); if (el && el.textContent !== text) el.textContent = text; };
+    set(".cpu .v", coresText(event.cpu));
+    set(".mem .v", memoryText(event.memory));
+    set(".mem .unit", event.limit ? ` of ${memoryText(event.limit)}` : "");
+    set(".cpu .pv", coresText(Math.max(...points.map((p) => p[0]))));
+    set(".mem .pv", memoryText(Math.max(...points.map((p) => p[1]))));
+    set(".cpu .ref-text", event.request ? `request ${coresText(event.request)}` : "");
+    set(".mem .ref-text", event.limit ? `limit ${memoryText(event.limit)}` : "");
+    const names = (event.tasks || []).map((ordinal) => document.querySelector(`#t-${ordinal} .name`)?.textContent).filter(Boolean);
+    set(".what", names.join(", "));
+    drawResources(card);
   }
 }
 
@@ -565,7 +600,7 @@ function applyFilter(input) {
 }
 
 function enhance(root) {
-  for (const el of root.querySelectorAll("[data-usage]")) drawUsage(el);
+  for (const card of root.querySelectorAll("[data-usage]")) drawResources(card);
   for (const form of root.querySelectorAll("form[method='post'], form[method='POST']")) {
     if (!once(form, "submit")) continue;
     form.addEventListener("submit", async (event) => {

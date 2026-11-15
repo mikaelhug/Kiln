@@ -239,6 +239,7 @@ mod tests {
             memory_limit: None,
             cached_steps: None,
             total_steps: None,
+            cpu_request_milli: None,
             steps: Vec::new(),
         }
     }

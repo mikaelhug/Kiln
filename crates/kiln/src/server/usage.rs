@@ -5,12 +5,14 @@ use serde::Serialize;
 
 const KEEP: usize = 60;
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Sample {
     pub at: i64,
     pub cpu: f64,
     pub memory: f64,
     pub limit: Option<f64>,
+    pub request: Option<f64>,
+    pub tasks: Vec<i64>,
 }
 
 #[derive(Default)]
@@ -33,7 +35,7 @@ impl Usage {
     }
 
     pub fn history(&self, build: i64) -> Vec<Sample> {
-        self.builds.lock().expect("usage").get(&build).map(|s| s.iter().copied().collect()).unwrap_or_default()
+        self.builds.lock().expect("usage").get(&build).map(|s| s.iter().cloned().collect()).unwrap_or_default()
     }
 
     pub fn forget(&self, build: i64) {

@@ -366,26 +366,72 @@ fn row_progress(build: &Build, live: &Live) -> Markup {
     }
 }
 
-pub fn live_card(build: &Build, live: &Live) -> Markup {
-    let points: Vec<[f64; 3]> = live.samples.iter().map(|s| [s.cpu, s.memory, s.limit.unwrap_or(0.0)]).collect();
+pub fn cores_text(cores: f64) -> String {
+    if cores < 0.1 { format!("{cores:.2}") } else { format!("{cores:.1}") }
+}
+
+pub fn resources_card(build: &Build, live: &Live, tasks: &[Task]) -> Markup {
+    let points: Vec<[f64; 4]> =
+        live.samples.iter().map(|s| [s.cpu, s.memory, s.limit.unwrap_or(0.0), s.request.unwrap_or(0.0)]).collect();
     let last = live.samples.last();
+    let peak = |pick: fn(&crate::server::usage::Sample) -> f64| {
+        live.samples.iter().map(pick).fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))))
+    };
+    let what: Vec<String> = last
+        .map(|s| s.tasks.iter().filter_map(|o| tasks.iter().find(|t| t.ordinal == *o)).map(task_title).collect())
+        .unwrap_or_default();
+    let dash = || "–".to_owned();
     html! {
-        div class="card live-card" {
-            @if let (Some(started), Some(finish)) = (build.started_at, live.finish) {
-                div class="progress" data-since=(started) data-finish=(finish) { span class="fill" {} }
-                span class="eta" data-eta {}
-            }
-            div class="usage" data-usage=(build.id) data-points=(serde_json::to_string(&points).unwrap_or_default()) {
-                span class="cpu" title="CPU, averaged by metrics-server" { i {} span class="v" { (last.map(|s| cpu_text(s.cpu)).unwrap_or_else(|| "– CPU".into())) } }
-                span class="mem" title="Memory, averaged by metrics-server" {
-                    i {}
-                    span class="v" { (last.map(|s| memory_text(s.memory)).unwrap_or_else(|| "– GiB".into())) }
-                    span class="of" { (last.and_then(|s| s.limit).map(|l| format!(" of {}", memory_text(l))).unwrap_or_default()) }
+        section class="card resources" data-usage=(build.id) data-points=(serde_json::to_string(&points).unwrap_or_default()) {
+            div class="resources-head" {
+                h2 { "Resources" }
+                span class="what" { (what.join(", ")) }
+                @if let (Some(started), Some(finish)) = (build.started_at, live.finish) {
+                    span class="eta" data-eta {}
+                    div class="progress" data-since=(started) data-finish=(finish) { span class="fill" {} }
                 }
-                svg class="trend" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true" {
-                    line class="limit" x1="0" y1="2" x2="100" y2="2" {}
-                    polyline class="cpu" points="" {}
-                    polyline class="mem" points="" {}
+            }
+            div class="metrics" {
+                div class="metric cpu" {
+                    div class="metric-head" {
+                        span class="label" { "CPU" }
+                        span class="now" { span class="v" { (last.map(|s| cores_text(s.cpu)).unwrap_or_else(dash)) } span class="unit" { " cores" } }
+                        span class="peak" { "peak " span class="pv" { (peak(|s| s.cpu).map(cores_text).unwrap_or_else(dash)) } }
+                    }
+                    div class="meter" role="meter" aria-label="CPU in use" aria-valuemin="0" {
+                        span class="fill" {} span class="mark peak-mark" {} span class="mark ref-mark" {}
+                    }
+                    svg class="area" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true" {
+                        line class="ref" x1="0" x2="100" y1="0" y2="0" {}
+                        path class="under" d="" {}
+                        path class="line" d="" {}
+                    }
+                    div class="metric-foot" {
+                        span { "15 s averages" }
+                        span class="ref-text" { (last.and_then(|s| s.request).map(|r| format!("request {}", cores_text(r))).unwrap_or_default()) }
+                    }
+                }
+                div class="metric mem" {
+                    div class="metric-head" {
+                        span class="label" { "Memory" }
+                        span class="now" {
+                            span class="v" { (last.map(|s| memory_text(s.memory)).unwrap_or_else(dash)) }
+                            span class="unit" { (last.and_then(|s| s.limit).map(|l| format!(" of {}", memory_text(l))).unwrap_or_default()) }
+                        }
+                        span class="peak" { "peak " span class="pv" { (peak(|s| s.memory).map(memory_text).unwrap_or_else(dash)) } }
+                    }
+                    div class="meter" role="meter" aria-label="Memory in use" aria-valuemin="0" {
+                        span class="fill" {} span class="mark peak-mark" {}
+                    }
+                    svg class="area" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true" {
+                        line class="ref" x1="0" x2="100" y1="0" y2="0" {}
+                        path class="under" d="" {}
+                        path class="line" d="" {}
+                    }
+                    div class="metric-foot" {
+                        span { "15 s averages" }
+                        span class="ref-text" { (last.and_then(|s| s.limit).map(|l| format!("limit {}", memory_text(l))).unwrap_or_default()) }
+                    }
                 }
             }
         }
@@ -1403,7 +1449,7 @@ pub fn build_head(ctx: &Context<'_>, data: &BuildData) -> Markup {
                 }
             }
         }
-        @if let Some(live) = &data.live { (live_card(build, live)) }
+        @if let Some(live) = &data.live { (resources_card(build, live, &data.tasks)) }
         (pipeline(data))
         (banner(build, data.ahead))
     }

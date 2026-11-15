@@ -265,6 +265,7 @@ pub struct Task {
     pub memory_limit: Option<i64>,
     pub cached_steps: Option<i64>,
     pub total_steps: Option<i64>,
+    pub cpu_request_milli: Option<i64>,
     pub steps: Vec<Step>,
 }
 

@@ -4,6 +4,7 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+- A running build's page has a Resources panel: CPU and memory as current value, peak, a meter against the request or limit and a 15-minute area chart, naming the task being measured. Memory turns amber at 75% and red at 90% of the limit.
 - Each page receives only the events it shows, and bursts are grouped, so pages stay quiet and log lines arrive in batches.
 - The live meter uses metrics-server's own sample times, scales memory against the limit and shows a trend once there are enough samples. On the dashboard a running build has a thin progress line and the time left instead of a growing row; numbers and trend are on the build page. Nothing animates while idle.
 - Time left is estimated from each remaining task's usual time, and a build running long shows how far over it is.
