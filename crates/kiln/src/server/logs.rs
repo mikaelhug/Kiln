@@ -210,4 +210,3 @@ mod tests {
         assert_eq!(shape, ["log 0 \"ab\\ncd\\n\"", "build 1", "log 10 \"gap\\n\""]);
     }
 }
-
