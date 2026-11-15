@@ -153,7 +153,8 @@ function refresh(selector, url) {
     pending.delete(selector);
     const target = document.querySelector(selector);
     if (!target) return;
-    if (document.querySelector("dialog[open]")) {
+    const editing = target.contains(document.activeElement) && document.activeElement.matches("input, textarea, select");
+    if (document.querySelector("dialog[open]") || editing) {
       refresh(selector, url);
       return;
     }
@@ -165,8 +166,9 @@ function refresh(selector, url) {
       if (!response.ok) return;
       const html = await response.text();
       if (generation.get(selector) !== ticket) return;
-      const next = document.createElement("div");
-      next.innerHTML = html;
+      const parsed = document.createElement("div");
+      parsed.innerHTML = html;
+      const next = parsed.querySelector(selector) || parsed;
       const images = next.querySelector("template[data-images]");
       if (images) {
         images.remove();
@@ -194,6 +196,7 @@ function refreshPage() {
     refresh("#live", `/fragments/build/${buildId}${location.search}`);
     refresh("#tasks", `/fragments/tasks/${buildId}${location.search}`);
   }
+  if (page === "system" || page === "settings") refresh("#live", location.pathname);
 }
 
 function reflectState() {
@@ -637,12 +640,17 @@ function connect() {
 
 function onEvent(message) {
   const event = JSON.parse(message.data);
-  if (event.type === "build") {
-    if (page === "dashboard" || page === "repos" || (page === "repo" && event.repo === repoId) || (page === "build" && event.build === buildId)) {
+  if (event.type === "resync") {
+    refreshPage();
+    if (page === "build" && log.task >= 0) loadLog(log.task, log.attempt);
+  } else if (event.type === "activity") {
+    if (page === "system" || page === "settings") refreshPage();
+  } else if (event.type === "build") {
+    if (page === "dashboard" || page === "repos" || page === "system" || (page === "repo" && event.repo === repoId) || (page === "build" && event.build === buildId)) {
       refreshPage();
     }
   } else if (event.type === "repo") {
-    if (page === "dashboard" || page === "repos" || (page === "repo" && event.repo === repoId)) refreshPage();
+    if (page === "dashboard" || page === "repos" || page === "system" || (page === "repo" && event.repo === repoId)) refreshPage();
   } else if (event.type === "log" && page === "build" && event.build === buildId) {
     if (event.attempt !== log.attempt || event.task !== log.task) return;
     if (event.offset === log.bytes) {

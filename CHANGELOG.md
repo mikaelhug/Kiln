@@ -4,6 +4,7 @@ All notable changes to Kiln are listed here. Kiln follows [semantic versioning](
 
 ## Unreleased
 
+- Live updates cover every page: steps update as they start and finish, releases show each image as it is published, System and Settings follow changes, and a browser that misses events catches up instead of going stale.
 - Every push to `main` publishes a tested `X.Y.(Z+1)-rc.N` image, so image automation can follow the latest Kiln.
 - `KILN_IMAGE` is optional: a release knows its own image, so image automation only updates the server image.
 - A service that stops or never opens its `port` fails the build instead of waiting for the timeout.

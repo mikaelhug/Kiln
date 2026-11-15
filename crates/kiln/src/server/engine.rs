@@ -127,6 +127,7 @@ impl<P: Platform> Engine<P> {
         if let Err(error) = self.store.audit(&entry) {
             tracing::warn!(%error, "writing the audit log failed");
         }
+        let _ = self.logs.events().send(Event::Activity);
     }
 
     async fn reconcile_loop(self: Arc<Self>) {
@@ -1100,6 +1101,7 @@ impl<P: Platform> Engine<P> {
                 Ok(Promotion::Created | Promotion::AlreadyThere) => {
                     self.store.record_release(build.repo_id, &image.name, &version, now())?;
                     self.store.set_released(id, &image.name, &version)?;
+                    let _ = self.logs.events().send(Event::Build { build: id, repo: build.repo_id });
                     self.audit(
                         "kiln",
                         "image_released",
@@ -1338,8 +1340,13 @@ impl<P: Platform> Engine<P> {
             Marker::Image { name, digest } if kind == TaskKind::Push => self.store.set_candidate(build, name, digest),
             Marker::Image { .. } => Ok(()),
         };
-        if let Err(error) = result {
-            tracing::warn!(%error, "recording a step marker failed");
+        match result {
+            Ok(()) => {
+                if let Ok(Some(found)) = self.store.build(build) {
+                    let _ = self.logs.events().send(Event::Build { build, repo: found.repo_id });
+                }
+            }
+            Err(error) => tracing::warn!(%error, "recording a step marker failed"),
         }
     }
 
@@ -1382,6 +1389,7 @@ impl<P: Platform> Engine<P> {
             task.ordinal,
             &TaskUpdate { log_final: Some(true), log_bytes: Some(bytes as i64), ..Default::default() },
         )?;
+        let _ = self.logs.events().send(Event::Build { build: build.id, repo: build.repo_id });
         Ok(())
     }
 

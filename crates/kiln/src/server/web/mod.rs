@@ -954,7 +954,7 @@ async fn events<P: Platform>(
     };
     let stream = tokio_stream::wrappers::BroadcastStream::new(receiver)
         .filter_map(|event| async move {
-            let event = event.ok()?;
+            let event = event.unwrap_or(crate::server::logs::Event::Resync);
             Some(Ok(SseEvent::default().data(serde_json::to_string(&event).ok()?)))
         })
         .take_until(Box::pin(revoked));

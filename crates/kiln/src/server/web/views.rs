@@ -1623,6 +1623,7 @@ pub fn system(ctx: &Context<'_>, data: &SystemData) -> Markup {
         ctx,
         &[("page", "system".into())],
         html! {
+            div id="live" {
             div class="page-head" {
                 div class="titles" { h1 { "System" } }
                 div class="actions" { (refresh_button()) }
@@ -1684,6 +1685,7 @@ pub fn system(ctx: &Context<'_>, data: &SystemData) -> Markup {
                     dl class="facts" { @for (key, value) in data.facts.iter().filter(|(k, _)| *k != "GitHub API") { dt { (key) } dd { (value) } } }
                 }
             }
+            }
         },
     )
 }
@@ -1704,8 +1706,9 @@ pub fn settings(ctx: &Context<'_>, data: &SettingsData) -> Markup {
         "Settings",
         "settings",
         ctx,
-        &[],
+        &[("page", "settings".into())],
         html! {
+            div id="live" {
             div class="page-head" { div class="titles" { h1 { "Settings" } } }
             div class="settings-grid" {
                 section class="card" {
@@ -1798,6 +1801,7 @@ pub fn settings(ctx: &Context<'_>, data: &SettingsData) -> Markup {
                         button class="button" type="submit" { "Add" }
                     }
                 }
+            }
             }
         },
     )

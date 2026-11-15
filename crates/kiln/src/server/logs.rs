@@ -15,6 +15,8 @@ pub enum Event {
     Repo { repo: i64 },
     Log { build: i64, attempt: i64, task: i64, offset: u64, text: String },
     LogReset { build: i64, attempt: i64, task: i64 },
+    Activity,
+    Resync,
 }
 
 pub struct Logs {
