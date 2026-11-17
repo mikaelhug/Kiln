@@ -65,7 +65,7 @@ Open <http://localhost:8080> and choose **Enter the demo**. The demo runs the re
 
 ## Install
 
-Kiln needs a Kubernetes cluster (1.30 or newer, with user namespaces and network policies), an OCI registry such as GitHub Container Registry, and a public HTTPS address for the UI and webhooks. The [requirements](docs/operations.md#requirements) list the details.
+Kiln needs a Kubernetes cluster (1.30 or newer, with user namespaces and network policies), an OCI registry such as GitHub Container Registry, and an HTTPS address for the UI. That address can stay private: GitHub webhooks only make builds start sooner. The [requirements](docs/operations.md#requirements) list the details.
 
 1. **Deploy.** Copy [`deploy/kubernetes`](deploy/kubernetes), set your address and apply it. There are no secrets to prepare.
 2. **Connect GitHub.** Open Kiln, enter the setup code from its log and click through to GitHub. Kiln creates its own GitHub App.

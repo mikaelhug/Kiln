@@ -8,7 +8,7 @@ This guide takes you from nothing to a first build. Kiln ships as one image, `gh
 - **User namespaces on the nodes**, which rootless BuildKit uses to sandbox image builds. Some distributions turn them off; on Talos, set the sysctl `user.max_user_namespaces` (for example `11255`) on every node.
 - **A CNI that enforces NetworkPolicy**, such as Cilium, Calico, or kube-network-policies.
 - **A CSI storage class with `ReadWriteOncePod`** for Kiln's database, and one with `ReadWriteOnce` for build caches.
-- **A way in from the internet:** the Gateway API with a Gateway that accepts routes from the `kiln` namespace, or an Ingress controller. GitHub must reach `/hooks/github`, and your browser the UI.
+- **An HTTPS address for the UI:** the Gateway API with a Gateway that accepts routes from the `kiln` namespace, or an Ingress controller. Only your browser must reach it, so it can stay on your LAN or VPN. If GitHub can also reach `/hooks/github`, builds start within seconds of a push; otherwise Kiln notices the push on its next check, within `KILN_POLL_SECONDS`, and GitHub lists the webhook deliveries as failed.
 - **An OCI registry**, such as GitHub Container Registry.
 - **Optional: kubelet serving certificates signed by the cluster CA**, for live CPU and memory of running builds and each task's peak use. Kiln reads them from each node's kubelet. On Talos, set the kubelet's `rotate-server-certificates: "true"` and run kubelet-serving-cert-approver.
 - **Optional: gVisor** (a `gvisor` RuntimeClass) to sandbox pull request builds.
